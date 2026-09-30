@@ -7,7 +7,7 @@ An examination of OpenAI’s Lean 4 formalization for 3D forced Navier–Stokes 
 ## 1. The Codebase Contradiction
 
 * **The Bounded Forcing Assumption (`ContinuousAccelerationForcing.lean`, Line 37):** In `forcing_bound`, the proof explicitly caps the iterated derivatives of the acceleration forcing $f$ by a finite prefactor $F$:
-  $$\Vert{}\text{iteratedFDeriv } \mathbb{R}\ n\ (\text{forcing } Q\ Q_1\ f\ v)\ x\Vert{} \le (3 \cdot C_0 \cdot (F + 6 \cdot C_1 \cdot V)) \cdot \text{majorant } R\ d\ n$$
+  $$\Vert\text{iteratedFDeriv } \mathbb{R}\ n\ (\text{forcing } Q\ Q_1\ f\ v)\ x\Vert \le (3 \cdot C_0 \cdot (F + 6 \cdot C_1 \cdot V)) \cdot \text{majorant } R\ d\ n$$
 * **The Forcing Injection (`TransverseMomentumRegularity.lean`, Line 35):** In `momentumForcing`, the code explicitly injects $+ (\text{timeMultiplier } T\ hT\ Q).\text{adjoint } f$ into the momentum equation to steer the fluid.
 * **The Evolution Balance (`MeanVelocityPressure.lean`, Line 115):** In `velocity_evolution`, the L2 evolution theorem balances directly to this external forcing function $f$:
   $$\text{s.velocityDerivative} + \text{timeMultiplier } T\ hT\ M\ \text{s.velocityField} + \text{s.pressureResidual} = f$$
