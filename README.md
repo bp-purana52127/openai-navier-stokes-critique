@@ -30,7 +30,7 @@ As vorticity ($\omega_3$) and strain tensor gradients ($A$) amplify, the require
 
 ## 3. Repository Structure
 
-* `openaispecific_2.py`: Python numerical simulation evaluating the Pressure Poisson Equation ($\Delta p = -\rho \text{tr}(A^2) + \text{momentum\_forcing}$) and plotting the required forcing energy trajectory against vorticity growth.
+* `openaispecific_2.py`: Python numerical simulation evaluating the Pressure Poisson Equation ($\Delta p = -\rho \operatorname{tr}(A^2) + \text{momentum\_forcing}$) and plotting the required forcing energy trajectory against vorticity growth.
 * `full_forcing_trace_2.txt`: Full algebraic extraction tracing the exact definition blocks for `momentumForcing`, `forcing`, `angularMeanForcing`, and `velocity_evolution` across the Lean files.
 * `extract_lean.v2_2.py`: Python extraction utility used to parse the Lean codebase and filter out external library dependencies.
 
