@@ -32,8 +32,33 @@ An examination of OpenAI’s Lean 4 formalization for 3D forced Navier–Stokes 
 
 ---
 
-## 3. Tooling & Execution
+## 3. 
+### Technical Finding: Mutual Exclusion in Parameter Scaling (Section 5.2 & 5.5)
 
+The proof of Theorem 1.1 relies on the existence of a parameter tuple (x_0, J, D_0, D_k) 
+satisfying the packet smallness condition (Equation 3.12):
+    P_j^Q <= k_j^(theta / 100)  ==>  Q * (log P_j / log k_j) <= 10^-8
+
+Using the paper's explicit recurrence relations (Equation 5.3) and background bound 
+formula (Equation 5.10), the sequence exhibits two structural failures:
+
+1. Stage J Boundary Failure:
+   The particle map derivative penalty K_{h,J} = k_{J-1}^C_* introduces a factor 
+   log(K_{h,J}) = 80 * D_k * ln(x_0). For prescribed D_k >= 50000, log(P_J) >= 3.68 x 10^7,
+   while log(k_J) = x_0 / J^2 = 100. The resulting ratio is ~3.68 x 10^6, violating the 
+   10^-8 threshold by 14 orders of magnitude.
+
+2. Finite-Stage Asymptotic Lag:
+   For stages j > J, the ratio log(K_{h,j}) / log(k_j) scales as 80*j^2 / (j-1)^4. 
+   Reaching the required threshold of 10^-8 requires j > 89,000. However, setting J > 89,000 
+   forces x_0 to scale exponentially to control S_base = 6 J^2 x_0^(2 - D_0/2), which 
+   in turn amplifies k_{J-1} and re-introduces the boundary failure at stage J.
+
+Conclusion: The parameter constraints in Section 5 are mutually exclusive for finite choices 
+of (x_0, J, D_0, D_k), invalidating the inductive realization in Section 5.7.
+
+
+FIles
 The repository includes the following scripts to extract and verify the definitions locally against a clone of `openai/NavierStokesAndEuler`:
 
 - `extract_lean.v2.py`: Parses Lean files and ignores build/external dependency paths (`.lake`).
@@ -41,9 +66,3 @@ The repository includes the following scripts to extract and verify the definiti
 - `verify_type_mismatch.py`: Runs automated checks confirming weak Bochner space vs. $C^\infty$ smoothness type mismatches.
 - `full_forcing_trace.txt`: Generated algebraic trace output.
 
-Run the pipeline sequentially:
-
-```bash
-python extract_lean.v2.py
-python trace.py
-python verify_type_mismatch.py
