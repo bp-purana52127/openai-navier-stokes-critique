@@ -1,0 +1,277 @@
+Full Algebraic Tracing of Engineered Forcing Terms
+================================================================================
+
+File: ./NavierStokesAndEuler/Euler/TransverseMomentumRegularity.lean
+Matched Term: forcing
+--------------------------------------------------------------------------------
+def momentum (u : TimeLp T E) : TimeLp T U := (timeMultiplier T hT Q).adjoint u
+
+/-- The forcing for the momentum derivative, before using the frame ODE. -/
+
+================================================================================
+
+File: ./NavierStokesAndEuler/Euler/TransverseMomentumRegularity.lean
+Matched Term: momentumForcing
+--------------------------------------------------------------------------------
+def momentumForcing (H : C(Icc (0 : ℝ) T, E →L[ℝ] E))
+    (u f : TimeLp T E) : TimeLp T U :=
+  (timeMultiplier T hT Q₁).adjoint u -
+    (timeMultiplier T hT Q).adjoint
+      (timeMultiplier T hT H (primitiveTimeLp T hT u)) +
+    (timeMultiplier T hT Q).adjoint f
+
+/-- The momentum field is pointwise `Q(t)* u(t)` almost everywhere. -/
+
+================================================================================
+
+File: ./NavierStokesAndEuler/Euler/TransverseMomentumRegularity.lean
+Matched Term: forcing
+--------------------------------------------------------------------------------
+theorem momentum_ae (u : TimeLp T E) :
+    (momentum T hT Q u : ℝ → U) =ᵐ[timeMeasure T]
+      fun t => (extendPath T hT Q t).adjoint (u t) := by
+  unfold momentum
+  rw [timeMultiplier_adjoint]
+  exact timeMultiplier_ae T hT (adjointPath T Q) u
+
+/-- The momentum forcing has its literal pointwise expression. -/
+
+================================================================================
+
+File: ./NavierStokesAndEuler/Euler/TransverseMomentumRegularity.lean
+Matched Term: momentumForcing
+--------------------------------------------------------------------------------
+theorem momentumForcing_ae (H : C(Icc (0 : ℝ) T, E →L[ℝ] E))
+    (u f : TimeLp T E) :
+    (momentumForcing T hT Q Q₁ H u f : ℝ → U) =ᵐ[timeMeasure T]
+      fun t => (extendPath T hT Q₁ t).adjoint (u t) -
+        (extendPath T hT Q t).adjoint
+          (extendPath T hT H t (realPrimitive T u t)) +
+        (extendPath T hT Q t).adjoint (f t) := by
+  change (momentum T hT Q₁ u -
+      momentum T hT Q (timeMultiplier T hT H (primitiveTimeLp T hT u)) +
+      momentum T hT Q f : TimeLp T U) =ᵐ[timeMeasure T] _
+  filter_upwards [Lp.coeFn_add
+      (momentum T hT Q₁ u -
+        momentum T hT Q (timeMultiplier T hT H (primitiveTimeLp T hT u)))
+      (momentum T hT Q f),
+    Lp.coeFn_sub (momentum T hT Q₁ u)
+      (momentum T hT Q (timeMultiplier T hT H (primitiveTimeLp T hT u))),
+    momentum_ae T hT Q₁ u,
+    momentum_ae T hT Q (timeMultiplier T hT H (primitiveTimeLp T hT u)),
+    momentum_ae T hT Q f,
+    timeMultiplier_ae T hT H (primitiveTimeLp T hT u),
+    primitiveTimeLp_ae T hT u] with t hadd hsub hq₁ hq hqf hHu hJu
+  simp only [Pi.add_apply, Pi.sub_apply] at hadd hsub
+  rw [hadd, hsub, hq₁, hq, hqf, hHu, hJu]
+
+/-- Every zero-endpoint coordinate test gives a genuine admissible physical test. -/
+
+================================================================================
+
+File: ./NavierStokesAndEuler/Euler/TransverseMomentumRegularity.lean
+Matched Term: momentumForcing
+--------------------------------------------------------------------------------
+theorem momentum_weak_of_product_tests
+    (hQ : ∀ t : Icc (0 : ℝ) T,
+      HasDerivWithinAt (extendPath T hT Q) (Q₁ t) (Icc (0 : ℝ) T) t)
+    (H : C(Icc (0 : ℝ) T, E →L[ℝ] E)) (u f : TimeLp T E)
+    (v : TimeLp T U)
+    (htest : ⟪u, productDerivative T hT Q Q₁ v⟫_ℝ -
+      ⟪timeMultiplier T hT H (primitiveTimeLp T hT u),
+        primitiveTimeLp T hT (productDerivative T hT Q Q₁ v)⟫_ℝ =
+      -⟪f, primitiveTimeLp T hT (productDerivative T hT Q Q₁ v)⟫_ℝ) :
+    ⟪momentum T hT Q u, v⟫_ℝ =
+      -⟪momentumForcing T hT Q Q₁ H u f, primitiveTimeLp T hT v⟫_ℝ := by
+  rw [primitiveTimeLp_productDerivative T hT Q Q₁ hQ] at htest
+  simp only [productDerivative, add_apply, comp_apply, inner_add_right] at htest
+  simp only [momentum, momentumForcing, inner_add_left, inner_sub_left,
+    adjoint_inner_left]
+  linarith only [htest]
+
+/-- The variational equation determines the weak derivative of actual momentum. -/
+
+================================================================================
+
+File: ./NavierStokesAndEuler/Euler/TransverseMomentumRegularity.lean
+Matched Term: momentumForcing
+--------------------------------------------------------------------------------
+theorem momentum_weak
+    (hQ : ∀ t : Icc (0 : ℝ) T,
+      HasDerivWithinAt (extendPath T hT Q) (Q₁ t) (Icc (0 : ℝ) T) t)
+    (m : Icc (0 : ℝ) T → E)
+    (hm : ∀ t x, ⟪m t, Q t x⟫_ℝ = 0)
+    (H : C(Icc (0 : ℝ) T, E →L[ℝ] E))
+    (u : transverseDerivatives T hT m) (f : TimeLp T E)
+    (hu : ∀ v : transverseDerivatives T hT m,
+      ⟪(u : TimeLp T E), (v : TimeLp T E)⟫_ℝ -
+        ⟪timeMultiplier T hT H (transversePrimitive T hT m u),
+          transversePrimitive T hT m v⟫_ℝ =
+        -⟪f, transversePrimitive T hT m v⟫_ℝ)
+    (v : TimeLp T U) (hv : initialTrace T hT v = 0) :
+    ⟪momentum T hT Q (u : TimeLp T E), v⟫_ℝ =
+      -⟪momentumForcing T hT Q Q₁ H (u : TimeLp T E) f,
+        primitiveTimeLp T hT v⟫_ℝ := by
+  have htest := hu ⟨productDerivative T hT Q Q₁ v,
+    productDerivative_mem_transverse T hT Q Q₁ hQ m hm v hv⟩
+  change ⟪(u : TimeLp T E), productDerivative T hT Q Q₁ v⟫_ℝ -
+    ⟪timeMultiplier T hT H (primitiveTimeLp T hT (u : TimeLp T E)),
+      primitiveTimeLp T hT (productDerivative T hT Q Q₁ v)⟫_ℝ =
+    -⟪f, primitiveTimeLp T hT (productDerivative T hT Q Q₁ v)⟫_ℝ at htest
+  exact momentum_weak_of_product_tests T hT Q Q₁ hQ H
+    (u : TimeLp T E) f v htest
+
+/-- The actual solved transverse momentum has an AC representative and the
+prescribed genuine a.e. derivative. This is a regularity conclusion of the solve. -/
+
+================================================================================
+
+File: ./NavierStokesAndEuler/Euler/TransverseMomentumRegularity.lean
+Matched Term: momentumForcing
+--------------------------------------------------------------------------------
+theorem transverseSolver_momentum_ac (hTpos : 0 < T)
+    (hQ : ∀ t : Icc (0 : ℝ) T,
+      HasDerivWithinAt (extendPath T hT Q) (Q₁ t) (Icc (0 : ℝ) T) t)
+    (m : Icc (0 : ℝ) T → E)
+    (hm : ∀ t x, ⟪m t, Q t x⟫_ℝ = 0)
+    (H : C(Icc (0 : ℝ) T, E →L[ℝ] E)) (K : ℝ) (hK : 0 ≤ K)
+    (hH : ∀ t x, ⟪H t x, x⟫_ℝ ≤ K * ‖x‖ ^ 2)
+    (hsmall : K * (T ^ 2 / 2) ≤ 1 / 2) (f : TimeLp T E) :
+    let u : TimeLp T E := transverseSolver T hT m H K hK hH hsmall f
+    ∃ p : ℝ → U, AbsolutelyContinuousOnInterval p 0 T ∧
+      (momentum T hT Q u : ℝ → U) =ᵐ[timeMeasure T] p ∧
+      ∀ᵐ t ∂timeMeasure T,
+        HasDerivAt p (momentumForcing T hT Q Q₁ H u f t) t := by
+  apply exists_ac_representative_of_weak T hTpos
+  intro v hv
+  exact momentum_weak T hT Q Q₁ hQ m hm H
+    (transverseSolver T hT m H K hK hH hsmall f) f
+    (transverseSolver_weak T hT m H K hK hH hsmall f) v hv
+
+end EulerTransverseMomentumRegularity
+
+================================================================================
+
+File: ./NavierStokesAndEuler/Euler/ContinuousAccelerationForcing.lean
+Matched Term: forcing
+--------------------------------------------------------------------------------
+def forcing (Q Q₁ : P → C(K,U →L[ℝ] E)) (f : P → C(K,E)) (v : P → C(K,U)) (x : P) : C(K,U) :=
+  multiplier (adjointMap (Q x)) (f x - (2 : ℝ) • multiplier (Q₁ x) (v x))
+
+/-- Actual uniform-time regularity of the acceleration forcing. -/
+
+================================================================================
+
+File: ./NavierStokesAndEuler/Euler/ContinuousAccelerationForcing.lean
+Matched Term: forcing
+--------------------------------------------------------------------------------
+theorem forcing_contDiff (Q Q₁ : P → C(K,U →L[ℝ] E)) (f : P → C(K,E)) (v : P → C(K,U))
+    {n : ℕ∞ω} (hQ : ContDiff ℝ n Q) (hQ₁ : ContDiff ℝ n Q₁)
+    (hf : ContDiff ℝ n f) (hv : ContDiff ℝ n v) : ContDiff ℝ n (forcing Q Q₁ f v) :=
+  contDiff_apply (fun x => adjointMap (Q x)) _ (contDiff_adjoint Q hQ)
+    (hf.sub ((contDiff_apply Q₁ v hQ₁ hv).const_smul (2 : ℝ)))
+
+/-- One fixed amplitude controls the genuine derivatives at every order. -/
+
+================================================================================
+
+File: ./NavierStokesAndEuler/Euler/ContinuousAccelerationForcing.lean
+Matched Term: forcing
+--------------------------------------------------------------------------------
+theorem forcing_bound (Q Q₁ : P → C(K,U →L[ℝ] E)) (f : P → C(K,E)) (v : P → C(K,U))
+    (hQ : ContDiff ℝ ∞ Q) (hQ₁ : ContDiff ℝ ∞ Q₁)
+    (hf : ContDiff ℝ ∞ f) (hv : ContDiff ℝ ∞ v)
+    (R C₀ C₁ F V : ℝ) (hR : 0 ≤ R) (hC₀ : 0 ≤ C₀) (hC₁ : 0 ≤ C₁)
+    (hF : 0 ≤ F) (hV : 0 ≤ V) (d : ℕ)
+    (hbQ : ∀ n x, ‖iteratedFDeriv ℝ n Q x‖ ≤ C₀*majorant R 0 n)
+    (hbQ₁ : ∀ n x, ‖iteratedFDeriv ℝ n Q₁ x‖ ≤ C₁*majorant R 0 n)
+    (hbf : ∀ n x, ‖iteratedFDeriv ℝ n f x‖ ≤ F*majorant R d n)
+    (hbv : ∀ n x, ‖iteratedFDeriv ℝ n v x‖ ≤ V*majorant R d n)
+    (n : ℕ) (x : P) :
+    ‖iteratedFDeriv ℝ n (forcing Q Q₁ f v) x‖ ≤ (3*C₀*(F+6*C₁*V))*majorant R d n := by
+  let w := fun y => multiplier (Q₁ y) (v y)
+  have hw : ContDiff ℝ ∞ w := contDiff_apply Q₁ v hQ₁ hv
+  have hbw (j : ℕ) (y : P) : ‖iteratedFDeriv ℝ j w y‖ ≤ (3*C₁*V)*majorant R d j := by
+    simpa only [Nat.zero_add] using apply_bound Q₁ v hQ₁ hv R C₁ V hR hC₁ hV 0 d hbQ₁ hbv j y
+  have hb2w (j : ℕ) (y : P) :
+      ‖iteratedFDeriv ℝ j (fun z => (2 : ℝ) • w z) y‖ ≤ (6*C₁*V)*majorant R d j := by
+    rw [iteratedFDeriv_const_smul_apply' (hw.contDiffAt.of_le (by simp)), norm_smul]
+    norm_num only [Real.norm_ofNat]
+    nlinarith [hbw j y]
+  let r := fun y => f y - (2 : ℝ) • w y
+  have hr : ContDiff ℝ ∞ r := hf.sub (hw.const_smul (2 : ℝ))
+  have hbr := sub_bound f (fun y => (2 : ℝ) • w y) hf (hw.const_smul (2 : ℝ))
+    R F (6*C₁*V) d hbf hb2w
+  have h := apply_bound (fun y => adjointMap (Q y)) r (contDiff_adjoint Q hQ) hr
+    R C₀ (F+6*C₁*V) hR hC₀ (by positivity) 0 d
+    (EulerContinuousPathComposition.adjoint_bound Q hQ R C₀ hR hC₀ 0 hbQ) hbr n x
+  simp only [Nat.zero_add] at h
+  convert h using 1
+  rfl
+
+end EulerContinuousAccelerationForcing
+
+================================================================================
+
+File: ./NavierStokesAndEuler/Euler/MeanPacketAngularForcing.lean
+Matched Term: forcing
+--------------------------------------------------------------------------------
+theorem angularMean_orbit :
+    ContDiff ℝ ∞ (fun a : Space => pathTranslation D.T a (pathMean P p)) := by
+  simpa only [pathTranslation, spatialPathTranslation, EulerLpTranslation.translation,
+    EulerMeanSolenoidal.translation] using pathMean_orbit_contDiff P p hp
+
+/-- A genuine forcing witness for the normalized angular mean. -/
+
+================================================================================
+
+File: ./NavierStokesAndEuler/Euler/MeanPacketAngularForcing.lean
+Matched Term: angularMeanForcing
+--------------------------------------------------------------------------------
+def angularMeanForcing : Forcing D (angularMeanRaw D P p hp) :=
+  Forcing.ofOrbitPath (pathMean P p) (angularMean_orbit D P p hp) (fun t x θ => by
+    simp only [angularMeanRaw, Data.clamp_coe]
+    exact congrFun (mean_pointField_eq P p hp t).symm x)
+
+/-- A raw cylinder field identified with that representative has the same admissible mean. -/
+
+================================================================================
+
+File: ./NavierStokesAndEuler/Euler/MeanPacketAngularForcing.lean
+Matched Term: angularMeanForcing
+--------------------------------------------------------------------------------
+def angularMeanForcing_of_raw (raw : VectorField)
+    (hraw : ∀ (t : Icc (0 : ℝ) D.T) x θ,
+      raw (t,(x,θ)) = pointField P p hp t (x,(θ : AddCircle P))) :
+    Forcing D (fun z => P⁻¹ • (∫ θ in (0 : ℝ)..P, raw (z.1,(z.2.1,θ)))) := by
+  apply (angularMeanForcing D P p hp).congr
+  intro t x θ
+  simp only [angularMeanRaw, Data.clamp_coe, rawMean]
+  congr 1
+  apply intervalIntegral.integral_congr
+  intro s _
+  exact hraw t x s
+
+end EulerMeanPacketProvider
+
+================================================================================
+
+File: ./NavierStokesAndEuler/Euler/MeanVelocityPressure.lean
+Matched Term: velocity_evolution
+--------------------------------------------------------------------------------
+theorem velocity_evolution (M : C(Icc (0 : ℝ) T, L2 →L[ℝ] L2))
+    (hM : ∀ (t : Icc (0 : ℝ) T) (x : L2), F₁ t x = M t (F t x)) :
+    s.velocityDerivative + timeMultiplier T hT M s.velocityField + s.pressureResidual = f := by
+  calc
+    _ = s.velocityDerivative + timeMultiplier T hT (solenoidalFrame T F₁) s.velocityLp +
+        s.pressureResidual := congrArg
+      (fun x : TimeLp T L2 => s.velocityDerivative+x+s.pressureResidual)
+      (s.movingVelocityField_eq M hM)
+    _ = f := by
+      simp only [velocityDerivative, fieldProductDerivative, pressureResidual, two_smul]
+      abel
+
+/-- The initial physical velocity is exactly the source's localized boundary value. -/
+
+================================================================================
+
