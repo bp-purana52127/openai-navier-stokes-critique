@@ -56,7 +56,7 @@ finite_residual : ∀ J m,
 Tracing `finite_residual` to its provider in `GluedStageEstimates.lean` (Line 298) and `ActualCycleResidualBounds.lean` (Line 473) reveals that `actualStageEstimates` is parameterized by an explicit external realization input `d`:
 
 ```lean
-(d : ∀ J, ActualCycleResidualBounds.PhysicalData B (N0 + 1)
+(d : ∀ J, ActualCycleResidualBounds.PhysicalData B (N + 1)
   (ActualCyclePreservation.state B N0 J).state
   (MixedDiagonalResidual.uncutVelocity A Bdirect J)
   (DiagonalJetBounds.uncutPrefix P (J + 1)))
