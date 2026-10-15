@@ -53,4 +53,4 @@ The repository includes the following scripts to extract and verify the definiti
 * `trace.py`: Extracts specific declaration blocks for target forcing terms.
 * `verify_type_mismatch.py`: Runs automated checks confirming weak Bochner space vs. $C^\infty$ smoothness type mismatches.
 * `full_forcing_trace.txt`: Generated algebraic trace output.
-* `ph_bound_verification.jl`: Arbitrary-precision Julia script testing the exact Section 5.2/5.7 parameter recursions, demonstrating the $10^{698}$ coerc
+* `ph_bound_verification.jl`: Arbitrary-precision Julia script testing the exact Section 5.2/5.7 parameter recursions, demonstrating the $10^{698}$ coercivity collapse.
