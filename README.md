@@ -162,3 +162,8 @@ Because $-1/8$ is independent of $n$, the bracket in the exponent becomes strict
 * `extract_scales_audit.py`: Python audit script extracting `exists_scales`, `ActualBounds`, `goodCost`, `highMajorant`, and scanning for `Classical.choice` / `sorry` across the repository.
 * `extract_ns_toplevel.py`, `dump_final_four.py`, `dump_theorem_1_1.py`, `dump_actual_candidate.py`, `dump_core_residual.py`: Dependency-graph and leaf-module extraction scripts exposing the exact theorem chains in `./NavierStokes/`.
 * `scales_and_summability_trace.txt`, `ns_toplevel_trace.txt`, `final_four_dump.txt`, `theorem_1_1_dump.txt`, `actual_candidate_dump.txt`, `core_residual_dump.txt`: Raw extracted Lean 4 source code proofs verifying every citation in this report.
+---
+
+## License
+
+This project is licensed under the [Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)](LICENSE) license. Commercial use is prohibited; academic and public citations are required.
