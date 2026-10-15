@@ -1,0 +1,596 @@
+================================================================================
+FILE: ./NavierStokesAndEuler/NavierStokes/R3/Theorem.lean
+================================================================================
+import NavierStokes.R3.ActualCandidate
+import NavierStokes.R3.CandidateBreakdown
+import NavierStokes.R3.ViscosityScaling
+import NavierStokes.R3.IntegratedDissipation
+
+/-!
+# Theorem 1.1: unconditional whole-space forced Navier–Stokes blowup
+
+The actual selected construction supplies the viscosity-one fields. Spatial
+rescaling gives every positive viscosity while retaining singular time one,
+compact support in strictly positive time for the force, and one kinetic-energy
+bound for all times before the singularity. Whole-space comparison excludes a
+global smooth finite-energy solution with the same prescribed force and datum.
+-/
+
+noncomputable section
+
+open Set MeasureTheory
+
+namespace NavierStokesR3
+
+open ProblemStatement ViscosityScaling
+
+/-- The full paper conclusion, together with the initial time interval on
+which the constructed velocity is at rest. No construction hypotheses remain. -/
+theorem theorem_1_1_with_initial_rest (ν : ℝ) (hν : 0 < ν) :
+    ∃ u : VelocityField, ∃ p : PressureField, ∃ f : VelocityField, ∃ K : Set Space,
+      CandidateProperties ν u p f K ∧
+      ¬ Nonempty (GlobalFiniteEnergySolution ν f) ∧
+      ∀ t : ℝ, |t| ≤ 3 / 8 → ∀ x : Space,
+        u (t, x) = 0 ∧ p (t, x) = 0 := by
+  obtain ⟨u, p, f, K, hc, hzero⟩ := ActualCandidate.selected_candidate_one_with_initial_rest
+  refine ⟨scaledVelocity ν u, scaledPressure ν p, scaledVelocity ν f,
+    (fun x : Space => Real.sqrt ν • x) '' K, candidate_at_viscosity hc hν, ?_, ?_⟩
+  · rintro ⟨v⟩
+    exact hc.no_global_solution_one ⟨normalized_global_solution hν v⟩
+  · intro t ht x
+    constructor
+    · change Real.sqrt ν • u (t, (Real.sqrt ν)⁻¹ • x) = 0
+      rw [(hzero t ht _).1, smul_zero]
+    · change ν • p (t, (Real.sqrt ν)⁻¹ • x) = 0
+      rw [(hzero t ht _).2, smul_zero]
+
+/-- Theorem 1.1, with all properties of the same velocity, pressure, force,
+and compact support witnessed simultaneously, for every positive viscosity. -/
+theorem theorem_1_1 : ProblemStatement.breakdownStatement := by
+  intro ν hν
+  obtain ⟨u, p, f, K, hc, hg, _⟩ := theorem_1_1_with_initial_rest ν hν
+  exact ⟨u, p, f, K, hc, hg⟩
+
+/-- The primary whole-space candidate-existence assertion at any positive viscosity. -/
+theorem candidateStatement (ν : ℝ) (hν : 0 < ν) :
+    ProblemStatement.candidateStatement ν := by
+  obtain ⟨u, p, f, K, hc, _⟩ := theorem_1_1 ν hν
+  exact ⟨u, p, f, K, hc⟩
+
+/-- The candidate construction is unconditional for every positive viscosity. -/
+theorem coreBreakdownStatement : ProblemStatement.coreBreakdownStatement :=
+  candidateStatement
+
+/-- The whole-space breakdown assertion is an unconditional theorem. -/
+theorem breakdownStatement : ProblemStatement.breakdownStatement := theorem_1_1
+
+/-- Theorem 1.1 and all energy conclusions of Lemma 10.4 hold for the same
+constructed fields. Total dissipation is explicitly integrable up to time one. -/
+theorem theorem_1_1_with_dissipation (ν : ℝ) (hν : 0 < ν) :
+    ∃ u : VelocityField, ∃ p : PressureField, ∃ f : VelocityField, ∃ K : Set Space,
+      CandidateProperties ν u p f K ∧
+      ¬ Nonempty (GlobalFiniteEnergySolution ν f) ∧
+      IntervalIntegrable (CompactEnergy.l2Norm f) volume 0 1 ∧
+      IntegrableOn (CompactEnergy.dissipation u) (Ico (0 : ℝ) 1) ∧
+      (∀ T ∈ Ico (0 : ℝ) 1,
+        CompactEnergy.l2Sq u T +
+          2 * ν * (∫ t in (0 : ℝ)..T, CompactEnergy.dissipation u t) ≤
+            (CompactEnergy.cumulativeForceNorm f T) ^ 2) ∧
+      2 * ν * (∫ t in Ico (0 : ℝ) 1, CompactEnergy.dissipation u t) ≤
+        (CompactEnergy.cumulativeForceNorm f 1) ^ 2 := by
+  obtain ⟨u, p, f, K, hc, hg⟩ := theorem_1_1 ν hν
+  exact ⟨u, p, f, K, hc, hg, CompactEnergy.candidate_energy_estimates hν hc⟩
+
+end NavierStokesR3
+
+
+================================================================================
+FILE: ./NavierStokesAndEuler/NavierStokes/R3ActualCandidate.lean
+================================================================================
+import NavierStokes.R3CompactCandidate
+import NavierStokes.ActualCandidateAssembly
+
+/-!
+# The project's actual sums give a compact whole-space candidate
+
+This is an extraction from `selected_witness`, which retains the original
+potential, direct field, and pressure sums. It does not invoke whole-space
+uniqueness or claim the comparator's nonexistence conclusion.
+-/
+
+noncomputable section
+
+namespace NavierStokes.R3CompactCandidate
+
+open ProblemStatement
+
+theorem selected_compact_candidate :
+    ∃ u : VelocityField, ∃ p : PressureField, ∃ f : VelocityField, Properties u p f := by
+  obtain ⟨a, _, ea, eb, ep, forcing, hc, _⟩ := ActualCandidateAssembly.selected_witness
+  exact ⟨_, _, _, of_localized_fields hc⟩
+
+end NavierStokes.R3CompactCandidate
+
+
+================================================================================
+FILE: ./NavierStokesAndEuler/NavierStokes/ComparatorTheorem.lean
+================================================================================
+import NavierStokes.ComparatorBridge
+import NavierStokes.ActualCandidateAssembly
+import NavierStokes.CandidateConsequences
+import NavierStokes.PeriodicPaperComparator
+
+/-!
+# The full periodic corollary implies option (D)
+
+For every positive viscosity, the full periodic corollary supplies a solution
+that blows up exactly at time one. Its same force and zero datum satisfy every
+condition in the comparator, including the force derivative decay bounds.
+
+No result here uses any of the comparator's unproved statements.
+-/
+
+noncomputable section
+
+namespace NavierStokes.ComparatorBridge
+
+open Set ProblemStatement
+open scoped ContDiff
+
+/-- Any witness of the original candidate statement implies option (D), for
+every positive viscosity, with all comparator hypotheses discharged. -/
+theorem option_D_of_candidate {u : VelocityField} {p : PressureField} {f : VelocityField}
+    (h : CandidateProperties u p f) (ν : ℝ) (hν : 0 < ν) :
+    ∃ (u₀ : Space → Space) (f : Space → ℝ → Space),
+      Comparator.InitialVelocityConditionPeriodic u₀ ∧ Comparator.ForceConditionPeriodic f ∧
+      ¬ (∃ v p, Comparator.NavierStokesExistenceAndSmoothnessPeriodic ν u₀ f v p) := by
+  have hFs : ContDiffOn ℝ ∞ (rescaledForce ν f) futureDomain :=
+    rescale_smooth h.force_smooth (ν ^ 2) hν.le
+  have hFp : UnitSpatialPeriodsOn (Ici 0) (rescaledForce ν f) :=
+    rescale_periodic h.force_periodic (ν ^ 2) hν.le
+  have hFt : CompactFutureTimeSupport (rescaledForce ν f) :=
+    rescale_support h.force_time_support (ν ^ 2) hν
+  have hFd := CandidateConsequences.futureJet_decay hFs hFp hFt
+  refine ⟨fun _ => 0, toComparator (rescaledForce ν f), zero_initial_condition,
+    forceConditionPeriodic_of_decay hFs hFp hFd, ?_⟩
+  rintro ⟨v, q, hv⟩
+  have hn := normalized_solution hν hv
+  exact MaximalLifespan.candidate_excludes_global_solution h
+    hn.velocity_smooth hn.pressure_smooth hn.velocity_periodic hn.pressure_periodic
+    hn.initial_velocity hn.divergence_free hn.navier_stokes
+
+/-- Option (D), with exactly the comparator's quantifiers, from the project's
+closed candidate construction. -/
+theorem navier_stokes_breakdown_periodic (ν : ℝ) (hν : ν > 0) :
+    ∃ (u₀ : EuclideanSpace ℝ (Fin 3) → EuclideanSpace ℝ (Fin 3))
+      (f : EuclideanSpace ℝ (Fin 3) → ℝ → EuclideanSpace ℝ (Fin 3)),
+      Comparator.InitialVelocityConditionPeriodic u₀ ∧ Comparator.ForceConditionPeriodic f ∧
+      ¬ (∃ v p, Comparator.NavierStokesExistenceAndSmoothnessPeriodic ν u₀ f v p) := by
+  obtain ⟨u, p, f, K, h, hglobal⟩ := PeriodicPaper.periodic_corollary ν hν
+  exact option_D_of_paper_candidate h hglobal
+
+end NavierStokes.ComparatorBridge
+
+
+================================================================================
+FILE: ./NavierStokesAndEuler/NavierStokes/PeriodicPaperTheorem.lean
+================================================================================
+import NavierStokes.PeriodicPaperSupport
+import NavierStokes.PeriodicPaperScalingSupport
+import NavierStokes.R3.ParabolicScaling
+import NavierStokes.R3.Theorem
+import NavierStokes.PeriodizePDE
+import NavierStokes.PeriodicViscosity
+import NavierStokes.CandidateConsequences
+
+/-!
+# The full periodic corollary of the paper
+
+The torus is represented by spatially periodic lifts to R³. The support
+clauses intersect topological support with the closed fundamental cube:
+they do not assert compact support of a nonzero periodic lift on all of R³.
+-/
+
+noncomputable section
+
+namespace NavierStokes.PeriodicPaper
+
+open ProblemStatement PeriodicLocalization Set
+open scoped ContDiff
+
+/-- The same velocity, pressure, and force satisfy every assertion of the
+periodic corollary before its singular time, which is exactly one. -/
+structure CandidateProperties (ν : ℝ) (u : VelocityField) (p : PressureField)
+    (f : VelocityField) (K : Set Space) : Prop where
+  velocity_smooth : ContDiffOn ℝ ∞ u preSingularDomain
+  pressure_smooth : ContDiffOn ℝ ∞ p preSingularDomain
+  force_smooth : ContDiff ℝ ∞ f
+  velocity_periodic : UnitSpatialPeriodsOn (Ico 0 1) u
+  pressure_periodic : UnitSpatialPeriodsOn (Ico 0 1) p
+  force_periodic : UnitSpatialPeriodsOn (Ici 0) f
+  support_compact : IsCompact K
+  support_interior : K ⊆ fundamentalInterior
+  velocity_support : ∀ t ∈ Ico (0 : ℝ) 1,
+    tsupport (fun x : Space => u (t, x)) ∩ fundamentalCube ⊆ K
+  pressure_support : ∀ t ∈ Ico (0 : ℝ) 1,
+    tsupport (fun x : Space => p (t, x)) ∩ fundamentalCube ⊆ K
+  zero_initial_velocity : ∀ x : Space, u (0, x) = 0
+  force_time_support : CompactFutureTimeSupport f
+  force_zero_nonpos : ∀ t ≤ (0 : ℝ), ∀ x : Space, f (t, x) = 0
+  divergence_free : ∀ t ∈ Ico (0 : ℝ) 1, ∀ x : Space,
+    spatialDivergence u t x = 0
+  navier_stokes : ∀ t ∈ Ioo (0 : ℝ) 1, ∀ x : Space,
+    NavierStokesR3.ProblemStatement.navierStokesResidual ν u p t x = f (t, x)
+  speed_unbounded : SpeedUnboundedAtOne u
+
+/-- A global smooth periodic competitor for precisely the prescribed force
+and zero initial datum. No energy or pressure normalization is required. -/
+structure GlobalSmoothSolution (ν : ℝ) (f : VelocityField) where
+  velocity : VelocityField
+  pressure : PressureField
+  velocity_smooth : ContDiffOn ℝ ∞ velocity futureDomain
+  pressure_smooth : ContDiffOn ℝ ∞ pressure futureDomain
+  velocity_periodic : UnitSpatialPeriodsOn (Ici 0) velocity
+  pressure_periodic : UnitSpatialPeriodsOn (Ici 0) pressure
+  zero_initial_velocity : ∀ x : Space, velocity (0, x) = 0
+  divergence_free : ∀ t ∈ Ici (0 : ℝ), ∀ x : Space,
+    spatialDivergence velocity t x = 0
+  navier_stokes : ∀ t ∈ Ioi (0 : ℝ), ∀ x : Space,
+    NavierStokesR3.ProblemStatement.navierStokesResidual ν velocity pressure t x = f (t, x)
+
+/-- Every periodic candidate excludes a global smooth periodic competitor. -/
+theorem CandidateProperties.no_global_solution {ν : ℝ} {u f : VelocityField}
+    {p : PressureField} {K : Set Space} (h : CandidateProperties ν u p f K)
+    (hν : 0 < ν) : ¬ Nonempty (GlobalSmoothSolution ν f) := by
+  rintro ⟨v⟩
+  exact PeriodicViscosity.excludes_global_solution hν
+    h.velocity_smooth h.pressure_smooth h.velocity_periodic h.pressure_periodic
+    h.zero_initial_velocity h.divergence_free h.navier_stokes h.speed_unbounded
+    v.velocity_smooth v.pressure_smooth v.velocity_periodic v.pressure_periodic
+    v.zero_initial_velocity v.divergence_free v.navier_stokes
+
+/-- Every order of the ordinary spacetime derivative of the prescribed force
+has arbitrary polynomial decay, as asserted in the periodic corollary proof. -/
+theorem CandidateProperties.force_derivative_decay {ν : ℝ} {u f : VelocityField}
+    {p : PressureField} {K : Set Space} (h : CandidateProperties ν u p f K)
+    (m : ℕ) (N : ℝ) (hN : 0 ≤ N) :
+    ∃ C : ℝ, 0 < C ∧ ∀ t : ℝ, 0 ≤ t → ∀ x : Space,
+      ‖iteratedFDeriv ℝ m f (t, x)‖ ≤ C * (1 + t) ^ (-N) := by
+  obtain ⟨C, hC, hbound⟩ := CandidateConsequences.futureJet_decay
+    h.force_smooth.contDiffOn h.force_periodic h.force_time_support m N hN
+  refine ⟨C, hC, ?_⟩
+  intro t ht x
+  rw [← CandidateConsequences.futureJet_eq_full ht x m h.force_smooth.contDiffAt]
+  exact hbound t ht x
+
+/-- Periodize a compact whole-space candidate after its supports have been
+compressed into the central quarter cube. The arbitrary post-one extensions
+are discarded before forming the lattice sum. -/
+theorem of_compact_candidate {ν : ℝ} {u f : VelocityField} {p : PressureField}
+    {K : Set Space} (h : NavierStokesR3.ProblemStatement.CandidateProperties ν u p f K)
+    (hK : K ⊆ fundamentalInterior)
+    (hu : ∀ t < (1 : ℝ), ∀ x : Space, u (t, x) ≠ 0 → ∀ i, |x i| ≤ 1 / 4)
+    (hp : ∀ t < (1 : ℝ), ∀ x : Space, p (t, x) ≠ 0 → ∀ i, |x i| ≤ 1 / 4)
+    (hf : SupportedInCube (1 / 4) f) :
+    CandidateProperties ν (periodize (beforeOne u)) (periodize (beforeOne p))
+      (periodize f) K := by
+  have hsu := beforeOne_supported hu
+  have hsp := beforeOne_supported hp
+  have hr : (1 / 4 : ℝ) < 1 / 2 := by norm_num
+  refine {
+    velocity_smooth := contDiffOn_periodize hsu (beforeOne_smooth h.velocity_smooth)
+    pressure_smooth := contDiffOn_periodize hsp (beforeOne_smooth h.pressure_smooth)
+    force_smooth := contDiff_periodize hf h.force_smooth
+    velocity_periodic := unitSpatialPeriodsOn_periodize _ _
+    pressure_periodic := unitSpatialPeriodsOn_periodize _ _
+    force_periodic := unitSpatialPeriodsOn_periodize _ _
+    support_compact := h.support_compact
+    support_interior := hK
+    velocity_support := ?_
+    pressure_support := ?_
+    zero_initial_velocity := ?_
+    force_time_support := compactFutureTimeSupport_periodize
+      (compactFutureTimeSupport_of_hasCompactSupport h.force_support.1)
+    force_zero_nonpos := ?_
+    divergence_free := ?_
+    navier_stokes := ?_
+    speed_unbounded := speedUnbounded_periodize hsu hr
+      (speedUnbounded_beforeOne h.speed_unbounded)
+  }
+  · intro t ht
+    apply periodize_tsupport_on_fundamentalCube hsu hr
+    simpa only [beforeOne, ht.2, ite_eq_left] using h.velocity_support t ht
+  · intro t ht
+    apply periodize_tsupport_on_fundamentalCube hsp hr
+    simpa only [beforeOne, ht.2, ite_eq_left] using h.pressure_support t ht
+  · intro x
+    apply periodize_eq_zero_of_timeSlice
+    intro y
+    rw [beforeOne_eq u (by norm_num : (0 : ℝ) < 1)]
+    exact h.zero_initial_velocity y
+  · intro t ht x
+    exact periodize_eq_zero_of_timeSlice (h.force_support.eq_zero_of_nonpos ht) x
+  · apply divergence_free_periodize hsu hr
+    intro t ht x
+    rw [spatialDivergence_congr (beforeOne_eventuallyEq u (z := (t, x)) ht.2)]
+    exact h.divergence_free t ht x
+  · apply navier_stokes_periodize hsu hsp hf hr
+    intro t ht x
+    rw [residual_viscosity_congr ν (beforeOne_eventuallyEq u (z := (t, x)) ht.2)
+      (beforeOne_eventuallyEq p (z := (t, x)) ht.2)]
+    exact h.navier_stokes t ht x
+
+/-- The full quantified periodic corollary, including support in the interior
+of the fundamental cube and absence of a global smooth periodic solution. -/
+def breakdownStatement : Prop :=
+  ∀ ν : ℝ, 0 < ν → ∃ u : VelocityField, ∃ p : PressureField,
+    ∃ f : VelocityField, ∃ K : Set Space,
+      CandidateProperties ν u p f K ∧ ¬ Nonempty (GlobalSmoothSolution ν f)
+
+/-- The full periodic corollary is unconditional for every positive
+viscosity. The affine parabolic clock preserves singular time exactly one. -/
+theorem periodic_corollary : breakdownStatement := by
+  intro ν hν
+  obtain ⟨u, p, f, K, hc, _, hrest⟩ :=
+    NavierStokesR3.theorem_1_1_with_initial_rest ν hν
+  obtain ⟨l, hl, hK, hu, hp, hf⟩ := exists_compression_scale hc
+  have hcompressed := NavierStokesR3.ParabolicScaling.compressedCandidate hc hrest hl
+  have hperiodic := of_compact_candidate hcompressed hK hu hp hf
+  exact ⟨_, _, _, _, hperiodic, hperiodic.no_global_solution hν⟩
+
+end NavierStokes.PeriodicPaper
+
+
+================================================================================
+FILE: ./NavierStokesAndEuler/NavierStokes/MixedCandidateAssembly.lean
+================================================================================
+import NavierStokes.MixedDiagonalResidual
+import NavierStokes.MixedDiagonalExtensions
+import NavierStokes.LocalAngularDiagonal
+
+/-!
+# Candidate assembly from the actual finite-stage obligations
+
+The inputs here concern raw increments, their finite uncut prefixes, and
+their local endpoint models. The scale sequence, infinite residual limits,
+away extensions, divergence and blow-up are then derived for the same sums.
+
+This is a conditional consumer. It does not construct the complete
+correction iteration or supply the finite-stage estimates it requires.
+-/
+
+noncomputable section
+
+namespace NavierStokes.MixedCandidateAssembly
+
+open Set Filter ProblemStatement
+open JointResidualLimits (OneSidedExtension)
+open DiagonalResidual (JetRate)
+open scoped Topology ContDiff
+
+universe u
+
+/-- The quantitative obligations are all on the raw fields or finite
+prefixes. In particular no infinite residual limit is a field here. -/
+structure StageEstimates (h qbig : ℝ) (A B : ℕ → VelocityField)
+    (P : ℕ → PressureField) where
+  potential_smooth : ∀ j, ContDiffOn ℝ ∞ (A j) (CutStageEstimates.physicalSublevel h qbig)
+  direct_smooth : ∀ j, ContDiffOn ℝ ∞ (B j) (CutStageEstimates.physicalSublevel h qbig)
+  pressure_smooth : ∀ j, ContDiffOn ℝ ∞ (P j) (CutStageEstimates.physicalSublevel h qbig)
+  gain : ℕ → ℝ
+  gain_zero : 0 ≤ gain 0
+  gain_pos : ∀ j, 1 ≤ j → 0 < gain j
+  gain_mono : Monotone gain
+  gain_top : Tendsto gain atTop atTop
+  potentialLoss : ℕ → ℝ
+  directLoss : ℕ → ℝ
+  pressureLoss : ℕ → ℝ
+  potentialConstant : ℕ → ℕ → ℝ
+  directConstant : ℕ → ℕ → ℝ
+  pressureConstant : ℕ → ℕ → ℝ
+  potentialLog : ℕ → ℕ → ℝ
+  directLog : ℕ → ℕ → ℝ
+  pressureLog : ℕ → ℕ → ℝ
+  potential_bound : CutStageEstimates.RawStageBounds (PhysicalWaveSum.physicalQ h)
+    A gain potentialLoss potentialConstant potentialLog
+    (PhysicalWaveSum.preterminal ∩ CutStageEstimates.physicalSublevel h qbig)
+  direct_bound : CutStageEstimates.RawStageBounds (PhysicalWaveSum.physicalQ h)
+    B gain directLoss directConstant directLog
+    (PhysicalWaveSum.preterminal ∩ CutStageEstimates.physicalSublevel h qbig)
+  pressure_bound : CutStageEstimates.RawStageBounds (PhysicalWaveSum.physicalQ h)
+    P gain pressureLoss pressureConstant pressureLog
+    (PhysicalWaveSum.preterminal ∩ CutStageEstimates.physicalSublevel h qbig)
+  backgroundLoss : ℕ → ℝ
+  residualLoss : ℕ → ℝ
+  finite_background : ∀ J m,
+    JetRate (𝓝[SpacetimeEndpoint.openPast 1] (1, (0 : Space))) (PhysicalWaveSum.physicalQ h)
+      (MixedDiagonalResidual.uncutVelocity A B J) m (-backgroundLoss m)
+  finite_residual : ∀ J m,
+    JetRate (𝓝[SpacetimeEndpoint.openPast 1] (1, (0 : Space))) (PhysicalWaveSum.physicalQ h)
+      (fun z => navierStokesResidual (MixedDiagonalResidual.uncutVelocity A B J)
+        (DiagonalJetBounds.uncutPrefix P (J + 1)) z.1 z.2) m (gain J - residualLoss m)
+
+theorem StageEstimates.exists_schedule {h qbig : ℝ}
+    {A B : ℕ → VelocityField} {P : ℕ → PressureField}
+    (E : StageEstimates h qbig A B P) (hh : 0 < h) (hh1 : h < 1 / 2)
+    (hqbig : 0 < qbig) (lower : ℕ) :
+    ∃ a : ℕ → ℕ, lower ≤ a 0 ∧ (∀ j, 0 < a j) ∧
+      (∀ j, 2 * a j ≤ a (j + 1)) ∧ StrictMono a ∧
+      Tendsto (fun j => (a j : ℝ)) atTop atTop ∧
+      (∀ j, 1 / (a j : ℝ) < qbig) ∧
+      MixedDiagonalSchedule.ThreeSmoothSums a h A B P ∧
+      JointResidualLimits.VanishingJointJets
+        (MixedDiagonalResidual.residual (fun j => (a j : ℝ)) (PhysicalWaveSum.physicalQ h) A B P) := by
+  have hS : ∀ᶠ z in 𝓝[SpacetimeEndpoint.openPast 1] (1, (0 : Space)),
+      z ∈ PhysicalWaveSum.preterminal := by
+    filter_upwards [self_mem_nhdsWithin] with z hz
+    exact hz.1
+  obtain ⟨a, hal, hap, had, ham, hat, hrecip, _, hs, hz⟩ :=
+    MixedDiagonalResidual.exists_physical_schedule_residual_zero hh hh1 hqbig
+      PhysicalWaveSum.preterminal_open (Subset.refl _) hS
+      E.potential_smooth E.direct_smooth E.pressure_smooth
+      E.gain E.potentialLoss E.directLoss E.pressureLoss E.backgroundLoss E.residualLoss
+      E.potentialConstant E.directConstant E.pressureConstant
+      E.potentialLog E.directLog E.pressureLog
+      E.potential_bound E.direct_bound E.pressure_bound
+      E.gain_zero E.gain_pos E.gain_mono E.gain_top E.finite_background E.finite_residual lower
+  exact ⟨a, hal, hap, had, ham, hat, hrecip, hs, hz⟩
+
+section ActualBase
+
+variable {F : OutgoingProfile.Profile} {W : NominalProfile.Witness F}
+    (H : NominalConeAssembly.Certificate W) {ld : ModulatedProfileAssembly.LoopData W}
+    (v : ModulatedProfileAssembly.Witness ld)
+
+/-- The actual anchored base and finite initialization share stage zero. -/
+noncomputable def potentialStages (upper : ℝ) (bandFloor : ℕ) {qbig : ℝ}
+    (initial : MixedAxisPreservation.PotentialStage.{u} F.data.h
+      (MixedAxisPreservation.localDomain F.data.h qbig))
+    (stages : ℕ → MixedAxisPreservation.PotentialStage.{u} F.data.h
+      (MixedAxisPreservation.localDomain F.data.h qbig)) : ℕ → VelocityField :=
+  MixedAxisPreservation.initializedSeries (TailGaugePotential.finalPotential H v upper bandFloor)
+    initial stages
+
+/-- Pressure is recorded as the actual base plus its initialization
+change, followed by the pressure differences of full correction stages. -/
+noncomputable def pressureStages (upper : ℝ) (bandFloor : ℕ)
+    (initial : PressureField) (stages : ℕ → PressureField) : ℕ → PressureField :=
+  fun j w => if j = 0 then FinalSlowBase.pressure H v upper bandFloor w + initial w
+    else stages (j - 1) w
+
+theorem pressureStages_zero (upper : ℝ) (bandFloor : ℕ)
+    (initial : PressureField) (stages : ℕ → PressureField) (w : SpaceTime) :
+    pressureStages H v upper bandFloor initial stages 0 w =
+      FinalSlowBase.pressure H v upper bandFloor w + initial w := by
+  simp [pressureStages]
+
+theorem pressureStages_succ (upper : ℝ) (bandFloor : ℕ)
+    (initial : PressureField) (stages : ℕ → PressureField) (j : ℕ) :
+    pressureStages H v upper bandFloor initial stages (j + 1) = stages j := by
+  funext w
+  simp only [pressureStages, Nat.add_eq_zero_iff, Nat.one_ne_zero, and_false, ite_false,
+    Nat.add_sub_cancel]
+
+/-- Supply the finite-stage construction once, for these exact raw
+families. All infinite-sum and final-force conditions are proved below. -/
+theorem candidate_of_finite_stages (upper : ℝ) (bandFloor : ℕ)
+    {qbig C : ℝ} (hqbig : 0 < qbig)
+    (initial : MixedAxisPreservation.PotentialStage.{u} F.data.h
+      (MixedAxisPreservation.localDomain F.data.h qbig))
+    (stages : ℕ → MixedAxisPreservation.PotentialStage.{u} F.data.h
+      (MixedAxisPreservation.localDomain F.data.h qbig))
+    (D : ℕ → DirectAngularDiagonal.AngularData (LocalAngularDiagonal.localSlowDomain F.data.h qbig))
+    (pInitial : PressureField) (pStages : ℕ → PressureField)
+    (E : StageEstimates F.data.h qbig
+      (potentialStages H v upper bandFloor initial stages) (LocalAngularDiagonal.rawSeries D)
+      (pressureStages H v upper bandFloor pInitial pStages))
+    (hInitial : MixedDiagonalExtensions.SublevelShrinkingSupport F.data.h C qbig initial.field)
+    (hStages : ∀ j, MixedDiagonalExtensions.SublevelShrinkingSupport F.data.h C qbig (stages j).field)
+    (hDirect : ∀ j, MixedDiagonalExtensions.SublevelShrinkingSupport F.data.h C qbig
+      (LocalAngularDiagonal.rawSeries D j))
+    (hpInitial : MixedDiagonalExtensions.SublevelShrinkingSupport F.data.h C qbig pInitial)
+    (hpStages : ∀ j, MixedDiagonalExtensions.SublevelShrinkingSupport F.data.h C qbig (pStages j))
+    (eA : ∀ x : Space, x 2 ≠ 0 →
+      EndpointCoordinates.endpointRoot (2 * F.data.h) (x 2) < qbig → ∀ j,
+      Nonempty (OneSidedExtension (potentialStages H v upper bandFloor initial stages j) x))
+    (eB : ∀ x : Space, x 2 ≠ 0 →
+      EndpointCoordinates.endpointRoot (2 * F.data.h) (x 2) < qbig → ∀ j,
+      Nonempty (OneSidedExtension (LocalAngularDiagonal.rawSeries D j) x))
+    (eP : ∀ x : Space, x 2 ≠ 0 →
+      EndpointCoordinates.endpointRoot (2 * F.data.h) (x 2) < qbig → ∀ j,
+      Nonempty (OneSidedExtension (pressureStages H v upper bandFloor pInitial pStages j) x)) :
+    candidateStatement := by
+  let A := potentialStages H v upper bandFloor initial stages
+  let B := LocalAngularDiagonal.rawSeries D
+  let P := pressureStages H v upper bandFloor pInitial pStages
+  obtain ⟨a, _, hap, _, ham, hat, hgap, hs, hz⟩ :=
+    E.exists_schedule F.data.h_pos F.data.h_lt_half hqbig 1
+  let ar : ℕ → ℝ := fun j => (a j : ℝ)
+  have ha0 : 0 < ar 0 := by
+    dsimp [ar]
+    exact_mod_cast hap 0
+  have hamin (j : ℕ) : ar 0 ≤ ar j := by
+    dsimp [ar]
+    exact_mod_cast ham.monotone (Nat.zero_le j)
+  have hA0 : ∀ x : Space, x ≠ 0 → x 2 = 0 → Nonempty (OneSidedExtension (A 0) x) := by
+    intro x hx hxz
+    exact MixedDiagonalExtensions.initial_add_extension F.data.h_pos F.data.h_lt_half hqbig
+      hInitial hx hxz (Classical.choice (TailGaugePotential.finalPotential_awayExtensions H v upper bandFloor x hx))
+  have hP0 : ∀ x : Space, x ≠ 0 → x 2 = 0 → Nonempty (OneSidedExtension (P 0) x) := by
+    intro x hx hxz
+    have h := MixedDiagonalExtensions.initial_add_extension F.data.h_pos F.data.h_lt_half hqbig
+      hpInitial hx hxz (Classical.choice ((SlowBaseEndpoint.final_fields_awayExtensions H v upper bandFloor).2 x hx))
+    simp only [P]
+    exact h
+  have hB0 : ∀ x : Space, x ≠ 0 → x 2 = 0 → Nonempty (OneSidedExtension (B 0) x) := by
+    intro x hx hxz
+    exact MixedDiagonalExtensions.extension_of_eventually_zero
+      ((hDirect 0).eventually_zero F.data.h_pos F.data.h_lt_half hqbig hx hxz)
+  have hAsupport (j : ℕ) (hj : j ≠ 0) :
+      MixedDiagonalExtensions.SublevelShrinkingSupport F.data.h C qbig (A j) := by
+    cases j with
+    | zero => exact (hj rfl).elim
+    | succ j => exact hStages j
+  have hPsupport (j : ℕ) (hj : j ≠ 0) :
+      MixedDiagonalExtensions.SublevelShrinkingSupport F.data.h C qbig (P j) := by
+    cases j with
+    | zero => exact (hj rfl).elim
+    | succ j => simpa only [P, pressureStages_succ] using hpStages j
+  have ea := MixedDiagonalExtensions.diagonal_awayExtensions_local
+    F.data.h_pos F.data.h_lt_half hqbig hat ha0 hamin (hgap 0) hAsupport hA0 eA
+  have eb := MixedDiagonalExtensions.diagonal_awayExtensions_local
+    F.data.h_pos F.data.h_lt_half hqbig hat ha0 hamin (hgap 0) (fun j _ => hDirect j) hB0 eB
+  have ep := MixedDiagonalExtensions.diagonal_awayExtensions_local
+    F.data.h_pos F.data.h_lt_half hqbig hat ha0 hamin (hgap 0) hPsupport hP0 eP
+  have hcut := LocalAngularDiagonal.spatialCut_angularSum_divergence
+    F.data.h_pos F.data.h_lt_half D hat ha0 hamin (hgap 0)
+  have haxis := MixedAxisPreservation.local_initialized_final_origin_blowup
+    H v upper bandFloor hqbig initial stages (LocalAngularDiagonal.angularSupport D) hat
+  obtain ⟨forcing, hc, _, _⟩ := MixedPeriodicAssembly.exists_candidate_force
+    (A := SolenoidalDiagonal.potentialSum ar (PhysicalWaveSum.physicalQ F.data.h) A)
+    (v := SolenoidalDiagonal.potentialSum ar (PhysicalWaveSum.physicalQ F.data.h) B)
+    (p := SolenoidalDiagonal.potentialSum ar (PhysicalWaveSum.physicalQ F.data.h) P)
+    (hs.potential.mono (fun _ hx => hx.1)) (hs.direct.mono (fun _ hx => hx.1))
+    (hs.pressure.mono (fun _ hx => hx.1)) hcut hz ea eb ep haxis
+  exact ⟨_, _, forcing, hc⟩
+
+end ActualBase
+
+end NavierStokes.MixedCandidateAssembly
+
+
+================================================================================
+FILE: ./NavierStokesAndEuler/NavierStokes/PaperAdditionalResults.lean
+================================================================================
+import NavierStokes.LabelCounting
+import NavierStokes.TorusCoverDegree
+import NavierStokes.MeanLocalDefectBounds
+import NavierStokes.AxisModelBounds
+import NavierStokes.AxisInverseFactors
+import NavierStokes.NaturalAxisJointAnalytic
+import NavierStokes.NaturalExitBounds
+import NavierStokes.OutgoingNegativeSlopeCone
+import NavierStokes.AppendixJoiningResults
+import NavierStokes.ReferenceEndpointRate
+import NavierStokes.AxisRootPressureBounds
+import NavierStokes.AppendixHeatResults
+import NavierStokes.TerminalEdgePaper
+import NavierStokes.FlatPrimitivePaper
+import NavierStokes.SeedConePaper
+import NavierStokes.SeedHandbackJets
+import NavierStokes.SmoothExponentialMomentMatrix
+import NavierStokes.RegularSingularIntegral
+import NavierStokes.PositiveAxisDifferential
+import NavierStokes.PaperLocalization
+import NavierStokes.R3.H3MaximalLifespan
+import NavierStokes.GenericSummationRealization
+import NavierStokes.GenericSupportLocalSummation
+import NavierStokes.ClosedIntervalMomentRepair
+import NavierStokes.UniformQuadraticBranch
+import NavierStokes.ParameterizedMomentRepair
+import NavierStokes.ModulatedProfileJetRates
+import NavierStokes.TrueConeLoopPaper
+import NavierStokes.WholeDomainPhysicalStageTheorem
+import NavierStokes.ParticularOneSided
+
+

@@ -1,0 +1,2342 @@
+================================================================================
+FILE: ./NavierStokesAndEuler/NavierStokes/ActualCandidateAssembly.lean
+================================================================================
+import NavierStokes.ActualCandidateConstruction
+import NavierStokes.InitialPhysicalData
+import NavierStokes.ActualPhysicalStageBounds
+import NavierStokes.GermCandidateAssembly
+import NavierStokes.ActualValidBandWaves
+import NavierStokes.ActualMeanExterior
+import NavierStokes.ActualPhysicalPrefixFields
+import NavierStokes.ActualStageEstimates
+import NavierStokes.ActualSignedExterior
+import NavierStokes.ActualCurrentParticularAssembly
+import NavierStokes.GluedStageEstimates
+import NavierStokes.ActualSignedWaveData
+import NavierStokes.CurrentSignedCurl
+import NavierStokes.ActualSignedPhysicalCoherence
+import NavierStokes.GermEndpointInputs
+
+/-!
+# Literal physical data for the actual candidate
+
+The initial fields use the same primary choice and the same initialized
+mean state as `ActualCandidateConstruction`.  Their support, smoothness,
+and axis germs are derived from those constructors.
+-/
+
+noncomputable section
+
+namespace NavierStokes.ActualCandidateAssembly
+
+
+open Set Function Filter ProblemStatement
+open CorrectionInitialization.ActualPrimary
+open scoped Topology ContDiff BigOperators
+
+/-! ## The finite initialization, without the base fields -/
+
+noncomputable def initialPotential (B N0 : ℕ) : VelocityField :=
+  InitialPhysicalData.potential B N0 + ActualCandidateConstruction.streamMeanStages B N0 0
+
+noncomputable def initialPressure (B N0 : ℕ) : PressureField :=
+  InitialPhysicalData.pressure B N0 + ActualCandidateConstruction.pressureMeanStages B N0 0
+
+noncomputable def initialDirect (B N0 : ℕ) : VelocityField :=
+  ActualCandidateConstruction.angularMeanStages B N0 0
+
+noncomputable def initialDirectData (B N0 : ℕ) :
+    DirectAngularDiagonal.AngularData
+      (LocalAngularDiagonal.localSlowDomain h (ActualCandidateConstruction.qbig B N0)) :=
+  ActualMeanStageData.initialAngularData B N0 (ActualCandidateConstruction.firstBand B N0)
+    (ActualCandidateConstruction.qbig B N0) le_rfl
+
+theorem initialDirectData_field (B N0 : ℕ) :
+    DirectAngularDiagonal.angularField (initialDirectData B N0).scalar = initialDirect B N0 := by
+  exact (ActualMeanStageData.initialAngularData_field B N0
+    (ActualCandidateConstruction.firstBand B N0) (ActualCandidateConstruction.qbig B N0) le_rfl).trans
+      (ActualCandidateConstruction.angularMeanStages_zero B N0).symm
+
+theorem initialPotential_eq_stage (B N0 : ℕ) :
+    initialPotential B N0 =
+      (ActualCandidateConstruction.initialPotentialStage B N0
+        (InitialPhysicalData.copyPotential B N0)).field := by
+  rw [ActualCandidateConstruction.initialPotentialStage_field, InitialPhysicalData.copyPotential_field]
+  rfl
+
+theorem initialPotential_eq_increment (B N0 : ℕ) :
+    initialPotential B N0 = ActualPhysicalStageBounds.initialIncrement
+      (InitialPhysicalData.potentialWaveData B N0)
+      (ActualPhysicalStageBounds.actualInitialTemporalInput B N0
+        (ActualCandidateConstruction.firstBand B N0) (ActualCandidateConstruction.firstBand_four B N0))
+      (ActualPhysicalStageBounds.actualInitialRankInput B N0
+        (ActualCandidateConstruction.firstBand B N0) (ActualCandidateConstruction.firstBand_four B N0)) := by
+  rw [initialPotential, ActualCandidateConstruction.streamMeanStages_zero,
+    ActualMeanPhysicalData.initialStream_angularField]
+  funext w
+  change InitialPhysicalData.potential B N0 w +
+      ((ActualMeanPhysicalData.initialTemporalFamily B N0
+        (ActualCandidateConstruction.firstBand B N0)).angularField w +
+       (ActualMeanPhysicalData.initialRankFamily B N0
+        (ActualCandidateConstruction.firstBand B N0)).angularField w) = _
+  exact (add_assoc _ _ _).symm
+
+theorem initialPressure_eq_increment (B N0 : ℕ) :
+    initialPressure B N0 = ActualPhysicalStageBounds.initialPressureIncrement
+      (InitialPhysicalData.pressureWaveData B N0)
+      (ActualPhysicalStageBounds.actualInitialPressureInput B N0
+        (ActualCandidateConstruction.firstBand B N0) (ActualCandidateConstruction.firstBand_four B N0)) := by
+  rw [initialPressure, ActualCandidateConstruction.pressureMeanStages_zero]
+  rfl
+
+theorem initialPotential_smooth (B N0 : ℕ) :
+    ContDiffOn ℝ ∞ (initialPotential B N0) (ActualCandidateConstruction.physicalDomain B N0) := by
+  rw [initialPotential_eq_increment]
+  exact ActualPhysicalStageBounds.initialIncrement_smooth _ _ _
+    outgoing.data.h_pos outgoing.data.h_lt_half le_rfl le_rfl
+
+theorem initialPressure_smooth (B N0 : ℕ) :
+    ContDiffOn ℝ ∞ (initialPressure B N0) (ActualCandidateConstruction.physicalDomain B N0) := by
+  rw [initialPressure_eq_increment]
+  exact ActualPhysicalStageBounds.initialPressureIncrement_smooth _ _
+    outgoing.data.h_pos outgoing.data.h_lt_half le_rfl
+
+theorem initialDirect_smooth (B N0 : ℕ) :
+    ContDiffOn ℝ ∞ (initialDirect B N0) (ActualCandidateConstruction.physicalDomain B N0) := by
+  rw [← initialDirectData_field]
+  exact (initialDirectData B N0).field_smooth
+    (LocalAngularDiagonal.localSlowDomain_open outgoing.data.h_pos outgoing.data.h_lt_half _)
+
+theorem initialPotential_support (B N0 : ℕ) :
+    MixedDiagonalExtensions.SublevelShrinkingSupport h PhysicalStageSupport.actualOuterConstant
+      (ActualCandidateConstruction.qbig B N0) (initialPotential B N0) := by
+  have hw := PhysicalStageSupport.wave_vector_support
+    (InitialPhysicalData.potentialWaveData B N0)
+    (qbig := ActualCandidateConstruction.qbig B N0)
+    (R := ActualInitialization.geometry.patch.b) (by exact le_rfl)
+  have hm := (ActualMeanStageData.initial_shrinkingSupport B N0
+    (ActualCandidateConstruction.firstBand B N0) (ActualCandidateConstruction.qbig B N0) le_rfl).2.2.2
+  erw [ActualMeanStageData.initialStreamSupport_field] at hm
+  rw [initialPotential, ActualCandidateConstruction.streamMeanStages_zero]
+  exact PhysicalStageSupport.support_add hw hm
+
+theorem initialPressure_support (B N0 : ℕ) :
+    MixedDiagonalExtensions.SublevelShrinkingSupport h PhysicalStageSupport.actualOuterConstant
+      (ActualCandidateConstruction.qbig B N0) (initialPressure B N0) := by
+  have hw := PhysicalStageSupport.wave_pressure_support
+    (InitialPhysicalData.pressureWaveData B N0)
+    (qbig := ActualCandidateConstruction.qbig B N0)
+    (R := ActualInitialization.geometry.patch.b) (by exact le_rfl)
+  have hm := (PhysicalStageSupport.actual_coherent_support
+    (ActualMeanPhysicalData.initialPressureFamily B N0 (ActualCandidateConstruction.firstBand B N0))
+    (ActualMeanStageData.nativeSupport_of_moving _
+      (ActualMeanPhysicalData.initial_pressure_moving B N0))
+    (qbig := ActualCandidateConstruction.qbig B N0) le_rfl).1
+  rw [initialPressure, ActualCandidateConstruction.pressureMeanStages_zero]
+  exact PhysicalStageSupport.support_add hw hm
+
+theorem initialDirect_support (B N0 : ℕ) :
+    MixedDiagonalExtensions.SublevelShrinkingSupport h PhysicalStageSupport.actualOuterConstant
+      (ActualCandidateConstruction.qbig B N0) (initialDirect B N0) := by
+  have hm := (ActualMeanStageData.initial_shrinkingSupport B N0
+    (ActualCandidateConstruction.firstBand B N0) (ActualCandidateConstruction.qbig B N0) le_rfl).1
+  erw [ActualMeanStageData.initialAngularSupport_field] at hm
+  simp only [initialDirect, ActualCandidateConstruction.angularMeanStages_zero]
+  exact hm
+
+theorem initialPotential_axisZeroOn (B N0 : ℕ) :
+    GermCandidateAssembly.AxisZeroOn
+      (MixedAxisPreservation.localDomain h (ActualCandidateConstruction.qbig B N0))
+      (initialPotential B N0) := by
+  rw [initialPotential_eq_stage]
+  exact GermCandidateAssembly.potentialStage_axisZeroOn outgoing.data.h_pos outgoing.data.h_lt_half _
+
+/-! ## Exact exterior coordinates -/
+
+theorem physicalRadiusX_eq (w : SpaceTime) :
+    PhysicalWaveSum.physicalPosition w 0 ^ 2 / (2 * PhysicalWaveSum.physicalQ h w) =
+      (SlowBorelBase.cartesianChart h w).2.1 := by
+  change PolarCharts.radius (PhysicalGraphBounds.radialProjection w) ^ 2 /
+      (2 * PhysicalWaveSum.physicalQ h w) =
+    AxisymmetricFields.radialEnergy w.2 / PhysicalWaveSum.physicalQ h w
+  rw [PolarCharts.radius_sq]
+  change (w.2 0 ^ 2 + w.2 1 ^ 2) / (2 * PhysicalWaveSum.physicalQ h w) =
+    ((w.2 0 ^ 2 + w.2 1 ^ 2) / 2) / PhysicalWaveSum.physicalQ h w
+  rw [div_div]
+
+theorem initialDirect_exterior (B N0 : ℕ) {w : SpaceTime}
+    (ht : w ∈ PhysicalWaveSum.preterminal)
+    (hq : PhysicalWaveSum.physicalQ h w ≤ ActualCandidateConstruction.qbig B N0)
+    (he : w ∉ ActualPolarCoverage.active) : initialDirect B N0 w = 0 := by
+  rw [initialDirect, ActualCandidateConstruction.angularMeanStages_zero]
+  exact (ActualMeanExterior.initialAngular_exterior B N0
+    (ActualCandidateConstruction.firstBand B N0) ht hq he).2
+
+theorem initialPotential_exterior (B N0 : ℕ) {w : SpaceTime}
+    (ht : w ∈ PhysicalWaveSum.preterminal)
+    (hq : PhysicalWaveSum.physicalQ h w ≤ ActualCandidateConstruction.qbig B N0)
+    (he : w ∉ ActualPolarCoverage.active) : initialPotential B N0 w = 0 := by
+  have hx : InitialPhysicalData.physicalX w ∉
+      Icc (NominalConeAssembly.activeLeft nominal) (NominalConeAssembly.activeRight nominal) := by
+    simpa only [InitialPhysicalData.physicalX, physicalRadiusX_eq,
+      ActualPolarCoverage.active, Set.mem_ofPred_eq] using he
+  change InitialPhysicalData.potential B N0 w +
+    ActualCandidateConstruction.streamMeanStages B N0 0 w = 0
+  rw [InitialPhysicalData.potential_zero_exterior B N0 ht hx,
+    ActualCandidateConstruction.streamMeanStages_zero,
+    (ActualMeanExterior.initialStream_exterior B N0
+      (ActualCandidateConstruction.firstBand B N0) ht hq he).2, add_zero]
+
+theorem initialPressure_exterior (B N0 : ℕ) {w : SpaceTime}
+    (ht : w ∈ PhysicalWaveSum.preterminal)
+    (hq : PhysicalWaveSum.physicalQ h w ≤ ActualCandidateConstruction.qbig B N0)
+    (he : w ∉ ActualPolarCoverage.active) : initialPressure B N0 w = 0 := by
+  have hx : InitialPhysicalData.physicalX w ∉
+      Icc (NominalConeAssembly.activeLeft nominal) (NominalConeAssembly.activeRight nominal) := by
+    simpa only [InitialPhysicalData.physicalX, physicalRadiusX_eq,
+      ActualPolarCoverage.active, Set.mem_ofPred_eq] using he
+  change InitialPhysicalData.pressure B N0 w +
+    ActualCandidateConstruction.pressureMeanStages B N0 0 w = 0
+  rw [InitialPhysicalData.pressure_zero_exterior B N0 ht hx,
+    ActualCandidateConstruction.pressureMeanStages_zero,
+    (ActualMeanExterior.initialPressure_exterior B N0
+      (ActualCandidateConstruction.firstBand B N0) ht hq he).1, add_zero]
+
+/-! ## The literal zeroth potential and pressure retain the base -/
+
+noncomputable def zerothPotential (B N0 : ℕ) : VelocityField :=
+  TailGaugePotential.finalPotential certificate modulation upper B + initialPotential B N0
+
+noncomputable def zerothPressure (B N0 : ℕ) : PressureField :=
+  FinalSlowBase.pressure certificate modulation upper B + initialPressure B N0
+
+theorem zerothPotential_eq_initialPotential (B N0 : ℕ) :
+    zerothPotential B N0 = ActualPhysicalStageBounds.initialPotential certificate modulation upper B
+      (InitialPhysicalData.potentialWaveData B N0)
+      (ActualPhysicalStageBounds.actualInitialTemporalInput B N0
+        (ActualCandidateConstruction.firstBand B N0) (ActualCandidateConstruction.firstBand_four B N0))
+      (ActualPhysicalStageBounds.actualInitialRankInput B N0
+        (ActualCandidateConstruction.firstBand B N0) (ActualCandidateConstruction.firstBand_four B N0)) := by
+  rw [zerothPotential, initialPotential_eq_increment]
+  rfl
+
+theorem zerothPotential_smooth (B N0 : ℕ) :
+    ContDiffOn ℝ ∞ (zerothPotential B N0) (ActualCandidateConstruction.physicalDomain B N0) := by
+  rw [zerothPotential_eq_initialPotential]
+  exact ActualPhysicalStageBounds.initialPotential_smooth certificate modulation upper B _ _ _ le_rfl le_rfl
+
+theorem zerothPressure_smooth (B N0 : ℕ) :
+    ContDiffOn ℝ ∞ (zerothPressure B N0) (ActualCandidateConstruction.physicalDomain B N0) :=
+  ((FinalSlowBase.pressure_smooth certificate modulation upper B).mono
+    (fun _ hw => ⟨hw.1, mem_univ _⟩)).add (initialPressure_smooth B N0)
+
+/-! ## The particular fields come from the same current state
+
+The valid-band representative uses the common physical floor. Its local
+formulas are the actual current solves, with the initializer's label order
+converted by `ActualCycleParameters.particularState` inside the producer.
+-/
+
+noncomputable def particularPotential (B N0 j : ℕ) : VelocityField :=
+  ActualValidBandWaves.potential (ActualCandidateConstruction.cycle B N0 j)
+    (ActualCandidateConstruction.firstBand B N0)
+
+noncomputable def particularPressure (B N0 j : ℕ) : PressureField :=
+  ActualValidBandWaves.pressure (ActualCandidateConstruction.cycle B N0 j)
+    (ActualCandidateConstruction.firstBand B N0)
+
+/-! ## Mean fields on the exact residual-comparison charts -/
+
+theorem meanChart_mem (B N0 n : ℕ) {a : ℝ} (ha : 0 < a) (i : PolarCharts.Index)
+    {w : SpaceTime}
+    (hw : w ∈ ActualPhysicalPrefixFields.cartesianChartDomain
+      (ActualCandidateConstruction.qbig B N0) n a i) :
+    (PhysicalMeanJetBounds.graph h n
+      ((ActualCandidateConstruction.meanAtlas B N0).gap n) w).2.1 ∈ standardRegion.carrier := by
+  have he := ActualMeanPotentialRealization.chartPoint_eq_graph ha i h n
+    (ActualCycleResidualBounds.actualGap n) (Nat.sub_le _ _) hw.2.1
+  rw [ActualCycleResidualBounds.actualGap_index] at he
+  change (PhysicalMeanJetBounds.graph h n (ActualCycleResidualBounds.actualGap n) w).2.1 ∈
+    standardRegion.carrier
+  rw [← he]
+  exact hw.2.2.2.1.1
+
+theorem initial_oscillation (B N0 n : ℕ) (x : PhysicalResidualBridge.Cylinder) (i : Fin 3) :
+    (ActualCandidateConstruction.cycle B N0 0).state.oscillation n x i =
+      ∑ l ∈ activeLabels standardRegion B N0 n,
+        (piece standardRegion l.2 l.1).velocity n x i := by
+  change (ActualInitialization.initialState B N0).oscillation n x i = _
+  rw [ActualInitialization.initialState_oscillation]
+  rfl
+
+theorem initial_oscillatoryPressure (B N0 n : ℕ) (x : PhysicalResidualBridge.Cylinder) :
+    (ActualCandidateConstruction.cycle B N0 0).state.oscillatoryPressure n x =
+      ∑ l ∈ activeLabels standardRegion B N0 n,
+        (piece standardRegion l.2 l.1).pressure n x := by
+  change (ActualInitialization.initialState B N0).oscillatoryPressure n x =
+    ∑ l ∈ (ActualInitialization.coefficients B N0).labels n,
+      (ActualInitialization.primaryPiece l).pressure n x
+  simp [ActualInitialization.initialState, ActualInitialization.rankState,
+    ActualInitialization.temporalState, ActualInitialization.primaryState,
+    ActualInitialization.sourceState, CorrectionInitialization.bandSeed,
+    CorrectionInitialization.GaugeInitialization.retainPressureAlias,
+    VariableGaugeMean.rankStageState, VariableGaugeMean.temporalStageState,
+    VariableGaugeMean.reconstructState, CorrectionState.State.addIncrement]
+
+theorem initialVelocity_on_cylinder (B N0 n d : ℕ) {z : SpaceTime}
+    (ht : z.1 < 1) (hr : 0 < z.2 0)
+    (hs : (PhysicalMeanJetBounds.graph h n d
+      (z.1, CylindricalResidual.chart z.2)).2.1 ∈ standardRegion.carrier) :
+    CyclePhysicalPrefixes.velocityMap (ActualCandidateConstruction.graph n)
+      ((ActualCandidateConstruction.cycle B N0 0).state.oscillation n) z =
+        CylindricalResidual.frame (-(z.2 1))
+          (SpatialCurl.spatialCurl (InitialPhysicalData.potential B N0)
+            (z.1, CylindricalResidual.chart z.2)) := by
+  ext j
+  simp only [CyclePhysicalPrefixes.velocityMap, LinearMap.coe_mk, AddHom.coe_mk,
+    PhysicalResidualTZ.velocityTZ, PhysicalResidualBridge.ScaledGraph.velocity_apply]
+  change ChartScales.Q n ^ (-CoordinateAlgebra.A h) *
+    (ActualCandidateConstruction.cycle B N0 0).state.oscillation n
+      (PhysicalResidualTZ.graphMapTZ (ActualCandidateConstruction.graph n) z) j = _
+  have he : (ActualCandidateConstruction.cycle B N0 0).state.oscillation n
+      (PhysicalResidualTZ.graphMapTZ (ActualCandidateConstruction.graph n) z) j =
+      ChartScales.Q n ^ CoordinateAlgebra.A h *
+        CylindricalResidual.frame (-(z.2 1))
+          (SpatialCurl.spatialCurl (InitialPhysicalData.potential B N0)
+            (z.1, CylindricalResidual.chart z.2)) j := by
+    rw [initial_oscillation]
+    exact InitialPhysicalData.velocity_chart_slow n d z ht hr hs j
+  rw [he, ← mul_assoc, ← Real.rpow_add (ChartScales.Q_pos n)]
+  simp
+
+theorem initialPressure_on_cylinder (B N0 n d : ℕ) {z : SpaceTime}
+    (ht : z.1 < 1) (hr : 0 < z.2 0)
+    (hs : (PhysicalMeanJetBounds.graph h n d
+      (z.1, CylindricalResidual.chart z.2)).2.1 ∈ standardRegion.carrier) :
+    CyclePhysicalPrefixes.pressureMap (ActualCandidateConstruction.graph n)
+      ((ActualCandidateConstruction.cycle B N0 0).state.oscillatoryPressure n) z =
+        InitialPhysicalData.pressure B N0 (z.1, CylindricalResidual.chart z.2) := by
+  change (ChartScales.Q n ^ (-CoordinateAlgebra.A h)) ^ 2 *
+    (ActualCandidateConstruction.cycle B N0 0).state.oscillatoryPressure n
+      (PhysicalResidualTZ.graphMapTZ (ActualCandidateConstruction.graph n) z) = _
+  have he : (ActualCandidateConstruction.cycle B N0 0).state.oscillatoryPressure n
+      (PhysicalResidualTZ.graphMapTZ (ActualCandidateConstruction.graph n) z) =
+      ChartScales.Q n ^ (2 * CoordinateAlgebra.A h) *
+        InitialPhysicalData.pressure B N0 (z.1, CylindricalResidual.chart z.2) := by
+    rw [initial_oscillatoryPressure]
+    exact InitialPhysicalData.pressure_chart_slow n d z ht hr hs
+  rw [he, pow_two, ← mul_assoc, ← Real.rpow_add (ChartScales.Q_pos n),
+    ← Real.rpow_add (ChartScales.Q_pos n)]
+  have he : -CoordinateAlgebra.A h + -CoordinateAlgebra.A h + 2 * CoordinateAlgebra.A h = 0 := by ring
+  rw [he, Real.rpow_zero, one_mul]
+
+theorem initialWavePotential_on_chart (B N0 n : ℕ)
+    {a : ℝ} (ha : 0 < a) (i : PolarCharts.Index) :
+    EqOn (SpatialCurl.spatialCurl (InitialPhysicalData.potential B N0))
+      (ActualCandidateConstruction.chartWaveParts B N0 a i n 0)
+      (ActualPhysicalPrefixFields.cartesianChartDomain
+        (ActualCandidateConstruction.qbig B N0) n a i) := by
+  intro w hw
+  let z := PhysicalCurlCovariance.polarCoordinates a i w
+  have hr : 0 < z.2 0 := (ActualMeanPotentialRealization.polarCoordinates_valid ha i hw.2.1).1
+  have hb : (z.1, CylindricalResidual.chart z.2) = w :=
+    ActualMeanPotentialRealization.polarCoordinates_back ha i hw.2.1
+  have hs : (PhysicalMeanJetBounds.graph h n
+      ((ActualCandidateConstruction.meanAtlas B N0).gap n)
+      (z.1, CylindricalResidual.chart z.2)).2.1 ∈ standardRegion.carrier := by
+    rw [hb]
+    exact meanChart_mem B N0 n ha i hw
+  have hangle : z.2 1 = (PhysicalCurlCovariance.polarInput a i w).2 := by
+    simp only [z, PhysicalCurlCovariance.polarCoordinates, AxisymmetricResidual.pack_one]
+  symm
+  change CyclePhysicalPrefixes.polarVelocityMap a i
+    (CyclePhysicalPrefixes.velocityMap (ActualCandidateConstruction.graph n)
+      ((ActualCandidateConstruction.cycle B N0 0).state.oscillation n)) w = _
+  simp only [CyclePhysicalPrefixes.polarVelocityMap, LinearMap.coe_mk, AddHom.coe_mk]
+  rw [← hangle]
+  change CylindricalResidual.frame (z.2 1)
+    (CyclePhysicalPrefixes.velocityMap (ActualCandidateConstruction.graph n)
+      ((ActualCandidateConstruction.cycle B N0 0).state.oscillation n) z) = _
+  rw [initialVelocity_on_cylinder B N0 n _ (z := z) hw.1.1 hr hs,
+    CylindricalResidual.frame_inverse', hb]
+
+theorem initialWavePressure_on_chart (B N0 n : ℕ)
+    {a : ℝ} (ha : 0 < a) (i : PolarCharts.Index) :
+    EqOn (InitialPhysicalData.pressure B N0)
+      (ActualCandidateConstruction.chartWavePressureParts B N0 a i n 0)
+      (ActualPhysicalPrefixFields.cartesianChartDomain
+        (ActualCandidateConstruction.qbig B N0) n a i) := by
+  intro w hw
+  let z := PhysicalCurlCovariance.polarCoordinates a i w
+  have hr : 0 < z.2 0 := (ActualMeanPotentialRealization.polarCoordinates_valid ha i hw.2.1).1
+  have hb : (z.1, CylindricalResidual.chart z.2) = w :=
+    ActualMeanPotentialRealization.polarCoordinates_back ha i hw.2.1
+  have hs : (PhysicalMeanJetBounds.graph h n
+      ((ActualCandidateConstruction.meanAtlas B N0).gap n)
+      (z.1, CylindricalResidual.chart z.2)).2.1 ∈ standardRegion.carrier := by
+    rw [hb]
+    exact meanChart_mem B N0 n ha i hw
+  symm
+  change CyclePhysicalPrefixes.pressureMap (ActualCandidateConstruction.graph n)
+    ((ActualCandidateConstruction.cycle B N0 0).state.oscillatoryPressure n) z = _
+  rw [initialPressure_on_cylinder B N0 n _ (z := z) hw.1.1 hr hs, hb]
+
+theorem chartDomain_band (B N0 n : ℕ) {a : ℝ} (ha : 0 < a) (i : PolarCharts.Index)
+    {w : SpaceTime}
+    (hw : w ∈ ActualPhysicalPrefixFields.cartesianChartDomain
+      (ActualCandidateConstruction.qbig B N0) n a i) :
+    w ∈ ValidDyadicBandCover.band h n := by
+  apply ValidDyadicBandCover.mem_band_iff.mpr
+  refine ⟨hw.1.1, ?_⟩
+  have hs := (meanChart_mem B N0 n ha i hw).2
+  rwa [PhysicalMeanJetBounds.graph_q_eq outgoing.data.h_pos outgoing.data.h_lt_half n
+    ((ActualCandidateConstruction.meanAtlas B N0).gap n) hw.1.1] at hs
+
+theorem direct_on_chart {B N0 : ℕ} (M : ActualCandidateConstruction.MeanCycleInput B N0)
+    (j n : ℕ) (hn : ActualCandidateConstruction.firstBand B N0 ≤ n)
+    {a : ℝ} (ha : 0 < a) (i : PolarCharts.Index) :
+    EqOn (LocalAngularDiagonal.rawSeries (ActualCandidateConstruction.directData M) j)
+      (ActualCandidateConstruction.chartDirectStages B N0 a i n j)
+      (ActualPhysicalPrefixFields.cartesianChartDomain
+        (ActualCandidateConstruction.qbig B N0) n a i) := by
+  intro w hw
+  rw [ActualCandidateConstruction.directData_field]
+  exact ActualCandidateConstruction.angularMeanStages_on_chart M j ha i n hn hw.1.1
+    (meanChart_mem B N0 n ha i hw) hw.2.1
+
+theorem stream_on_chart {B N0 : ℕ} (M : ActualCandidateConstruction.MeanCycleInput B N0)
+    (j n : ℕ) (hn : ActualCandidateConstruction.firstBand B N0 ≤ n)
+    {a : ℝ} (ha : 0 < a) (i : PolarCharts.Index) :
+    EqOn (SpatialCurl.spatialCurl (ActualCandidateConstruction.streamMeanStages B N0 j))
+      (ActualCandidateConstruction.chartStreamParts B N0 a i n j)
+      (ActualPhysicalPrefixFields.cartesianChartDomain
+        (ActualCandidateConstruction.qbig B N0) n a i) := by
+  intro w hw
+  exact ActualCandidateConstruction.streamMeanStages_curl_on_chart M j ha i n hn hw.1.1
+    (meanChart_mem B N0 n ha i hw) hw.2.1
+
+theorem meanPressure_on_chart {B N0 : ℕ} (M : ActualCandidateConstruction.MeanCycleInput B N0)
+    (j n : ℕ) (hn : ActualCandidateConstruction.firstBand B N0 ≤ n)
+    {a : ℝ} (ha : 0 < a) (i : PolarCharts.Index) :
+    EqOn (ActualCandidateConstruction.pressureMeanStages B N0 j)
+      (ActualCandidateConstruction.chartMeanPressureParts B N0 a i n j)
+      (ActualPhysicalPrefixFields.cartesianChartDomain
+        (ActualCandidateConstruction.qbig B N0) n a i) := by
+  intro w hw
+  exact ActualCandidateConstruction.pressureMeanStages_on_chart M j ha i n hn hw.1.1
+    (meanChart_mem B N0 n ha i hw) hw.2.1
+
+theorem stream_exterior {B N0 : ℕ} (M : ActualCandidateConstruction.MeanCycleInput B N0)
+    (j : ℕ) {w : SpaceTime} (ht : w ∈ PhysicalWaveSum.preterminal)
+    (hq : PhysicalWaveSum.physicalQ h w ≤ ActualCandidateConstruction.qbig B N0)
+    (he : w ∉ ActualPolarCoverage.active) :
+    ActualCandidateConstruction.streamMeanStages B N0 j w = 0 := by
+  cases j with
+  | zero =>
+      rw [ActualCandidateConstruction.streamMeanStages_zero]
+      exact (ActualMeanExterior.initialStream_exterior B N0
+        (ActualCandidateConstruction.firstBand B N0) ht hq he).2
+  | succ j =>
+      rw [ActualCandidateConstruction.streamMeanStages_succ M]
+      exact (ActualMeanExterior.cycleStream_exterior M j ht hq he).2
+
+theorem direct_exterior {B N0 : ℕ} (M : ActualCandidateConstruction.MeanCycleInput B N0)
+    (j : ℕ) {w : SpaceTime} (ht : w ∈ PhysicalWaveSum.preterminal)
+    (hq : PhysicalWaveSum.physicalQ h w ≤ ActualCandidateConstruction.qbig B N0)
+    (he : w ∉ ActualPolarCoverage.active) :
+    LocalAngularDiagonal.rawSeries (ActualCandidateConstruction.directData M) j w = 0 := by
+  rw [ActualCandidateConstruction.directData_field]
+  cases j with
+  | zero => exact initialDirect_exterior B N0 ht hq he
+  | succ j =>
+      rw [ActualCandidateConstruction.angularMeanStages_succ M]
+      exact (ActualMeanExterior.cycleAngularIncrement_exterior M j ht hq he).2
+
+theorem meanPressure_exterior {B N0 : ℕ} (M : ActualCandidateConstruction.MeanCycleInput B N0)
+    (j : ℕ) {w : SpaceTime} (ht : w ∈ PhysicalWaveSum.preterminal)
+    (hq : PhysicalWaveSum.physicalQ h w ≤ ActualCandidateConstruction.qbig B N0)
+    (he : w ∉ ActualPolarCoverage.active) :
+    ActualCandidateConstruction.pressureMeanStages B N0 j w = 0 := by
+  cases j with
+  | zero =>
+      rw [ActualCandidateConstruction.pressureMeanStages_zero]
+      exact (ActualMeanExterior.initialPressure_exterior B N0
+        (ActualCandidateConstruction.firstBand B N0) ht hq he).1
+  | succ j =>
+      rw [ActualCandidateConstruction.pressureMeanStages_succ M]
+      exact (ActualMeanExterior.cyclePressureIncrement_exterior M j ht hq he).1
+
+theorem stream_axisZeroOn {B N0 : ℕ} (M : ActualCandidateConstruction.MeanCycleInput B N0)
+    (j : ℕ) :
+    GermCandidateAssembly.AxisZeroOn
+      (MixedAxisPreservation.localDomain h (ActualCandidateConstruction.qbig B N0))
+      (ActualCandidateConstruction.streamMeanStages B N0 j) := by
+  rw [← ActualCandidateConstruction.meanStreamSupport_field M j]
+  exact GermCandidateAssembly.angularSupport_axisZeroOn outgoing.data.h_pos outgoing.data.h_lt_half _
+
+/-! ## The actual native run supplies every mean and signed request -/
+
+noncomputable def runData (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    ActualStageEstimates.RunData B N0 where
+  invariant := ActualCyclePreservation.state_invariant B N0 hN
+  step := ActualCyclePreservation.state_stepData B N0 hN
+  particular := ActualCyclePreservation.state_particularInputs B N0 hN
+
+theorem meanCycleInput (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    ActualCandidateConstruction.MeanCycleInput B N0 :=
+  ActualCycleCoherence.mean_input_of_transport B N0 (ActualCandidateConstruction.firstBand B N0)
+    ActualIterationLedger.sigma ActualCoreSupport.refinedCarrier
+    (ActualCyclePreservation.state_invariant B N0 hN)
+    (ActualCyclePreservation.state_waveData B N0 hN)
+    (ActualCyclePreservation.state_wave_transport B N0 hN)
+
+theorem postParticularResult (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    ActualParticularMeanGain.Result (ActualCandidateConstruction.cycle B N0 j)
+      (ActualIterationLedger.sigma j) :=
+  ActualParticularMeanGain.postParticular_gain
+    (ActualCyclePreservation.state_invariant B N0 hN j)
+    (ActualCyclePreservation.state_particularInputs B N0 hN j)
+    (ActualIterationLedger.sigma_admissible j)
+
+noncomputable def signedPotential (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) : VelocityField :=
+  ActualSignedExterior.cyclePotential (ActualCandidateConstruction.cycle B N0 j)
+    (postParticularResult B N0 hN j).primitive
+    (ActualSignedPhysicalBinding.afterParticular_pressure (ActualCandidateConstruction.cycle B N0 j)
+      (postParticularResult B N0 hN j).primitive)
+
+noncomputable def signedPressure (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) : PressureField :=
+  ActualSignedExterior.cyclePressure (ActualCandidateConstruction.cycle B N0 j)
+    (postParticularResult B N0 hN j).primitive
+    (ActualSignedPhysicalBinding.afterParticular_pressure (ActualCandidateConstruction.cycle B N0 j)
+      (postParticularResult B N0 hN j).primitive)
+
+noncomputable def positivePotential (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) : VelocityField :=
+  particularPotential B N0 j + signedPotential B N0 hN j +
+    ActualCandidateConstruction.streamMeanStages B N0 (j + 1)
+
+noncomputable def positivePressure (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) : PressureField :=
+  particularPressure B N0 j + signedPressure B N0 hN j +
+    ActualCandidateConstruction.pressureMeanStages B N0 (j + 1)
+
+noncomputable def directData (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    ℕ → DirectAngularDiagonal.AngularData
+      (LocalAngularDiagonal.localSlowDomain h (ActualCandidateConstruction.qbig B N0)) :=
+  ActualCandidateConstruction.directData (meanCycleInput B N0 hN)
+
+noncomputable def potentialStages (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) : ℕ → VelocityField :=
+  GermCandidateAssembly.potentialStages certificate modulation upper B
+    (initialPotential B N0) (positivePotential B N0 hN)
+
+noncomputable def directStages (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) : ℕ → VelocityField :=
+  LocalAngularDiagonal.rawSeries (directData B N0 hN)
+
+noncomputable def pressureStages (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) : ℕ → PressureField :=
+  MixedCandidateAssembly.pressureStages certificate modulation upper B
+    (initialPressure B N0) (positivePressure B N0 hN)
+
+theorem potentialStages_zero (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    potentialStages B N0 hN 0 = zerothPotential B N0 := rfl
+
+theorem potentialStages_succ (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    potentialStages B N0 hN (j + 1) = positivePotential B N0 hN j := rfl
+
+theorem directStages_eq (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    directStages B N0 hN j = ActualCandidateConstruction.angularMeanStages B N0 j :=
+  ActualCandidateConstruction.directData_field (meanCycleInput B N0 hN) j
+
+theorem directStages_zero (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    directStages B N0 hN 0 = initialDirect B N0 := directStages_eq B N0 hN 0
+
+theorem pressureStages_zero (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    pressureStages B N0 hN 0 = zerothPressure B N0 := rfl
+
+theorem pressureStages_succ (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    pressureStages B N0 hN (j + 1) = positivePressure B N0 hN j := rfl
+
+/-! ## Geometric inputs are consequences of the same constructed fields -/
+
+theorem particular_smooth (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    ContDiffOn ℝ ∞ (particularPotential B N0 j) (ActualCandidateConstruction.physicalDomain B N0) ∧
+      ContDiffOn ℝ ∞ (particularPressure B N0 j) (ActualCandidateConstruction.physicalDomain B N0) :=
+  ActualValidBandWaves.fields_smooth
+    (ActualCyclePreservation.state_invariant B N0 hN j)
+    (ActualCyclePreservation.state_coherent B N0 hN j) hN
+    ActualCoreSupport.refinedCarrier_closed (fun _ _ => Subset.rfl) le_rfl
+
+theorem particular_support (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    MixedDiagonalExtensions.SublevelShrinkingSupport h PhysicalStageSupport.actualOuterConstant
+        (ActualCandidateConstruction.qbig B N0) (particularPotential B N0 j) ∧
+      MixedDiagonalExtensions.SublevelShrinkingSupport h PhysicalStageSupport.actualOuterConstant
+        (ActualCandidateConstruction.qbig B N0) (particularPressure B N0 j) :=
+  ActualValidBandWaves.shrinking_support
+    (ActualCyclePreservation.state_invariant B N0 hN j)
+    (ActualCyclePreservation.state_coherent B N0 hN j) hN
+    ActualCoreSupport.refinedCarrier_closed (fun _ _ => Subset.rfl) le_rfl
+
+theorem particular_axisZeroOn (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    GermCandidateAssembly.AxisZeroOn
+      (MixedAxisPreservation.localDomain h (ActualCandidateConstruction.qbig B N0))
+      (particularPotential B N0 j) :=
+  ActualValidBandWaves.axis_zero
+    (ActualCyclePreservation.state_invariant B N0 hN j)
+    (ActualCyclePreservation.state_coherent B N0 hN j) hN
+    ActualCoreSupport.refinedCarrier_closed (fun _ _ => Subset.rfl) le_rfl
+
+theorem particular_zero_germs (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) {w : SpaceTime}
+    (hw : w ∈ ActualCandidateConstruction.physicalDomain B N0)
+    (he : w ∉ ActualPolarCoverage.active) :
+    (particularPotential B N0 j =ᶠ[𝓝 w] fun _ => 0) ∧
+      (particularPressure B N0 j =ᶠ[𝓝 w] fun _ => 0) :=
+  ActualValidBandWaves.active_zero_germs
+    (ActualCyclePreservation.state_invariant B N0 hN j)
+    (ActualCyclePreservation.state_coherent B N0 hN j) hN
+    ActualCoreSupport.refinedCarrier_closed (fun _ _ => Subset.rfl) le_rfl hw he
+
+theorem signed_zero_germs (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) {w : SpaceTime}
+    (ht : w ∈ PhysicalWaveSum.preterminal) (he : w ∉ ActualPolarCoverage.active) :
+    (signedPotential B N0 hN j =ᶠ[𝓝 w] fun _ => 0) ∧
+      (signedPressure B N0 hN j =ᶠ[𝓝 w] fun _ => 0) :=
+  ActualSignedExterior.cycle_zero_germs _ _ _ ht he
+
+theorem support_of_exterior_zero {V : Type*} [NormedAddCommGroup V] [NormedSpace ℝ V]
+    {f : SpaceTime → V} {qbig : ℝ}
+    (hz : ∀ w, w ∈ PhysicalWaveSum.preterminal → w ∉ ActualPolarCoverage.active → f w = 0) :
+    MixedDiagonalExtensions.SublevelShrinkingSupport h PhysicalStageSupport.actualOuterConstant qbig f := by
+  intro w ht _ hn
+  have ha : w ∈ ActualPolarCoverage.active := by
+    by_contra hna
+    exact hn (hz w ht hna)
+  have hr := ((ActualCurrentWaveSupport.profileRadius_mem_iff_active ht).mpr ha).2.trans
+    ActualCurrentWaveSupport.rightRadius_le_actualOuterConstant
+  exact (div_le_iff₀ (Real.sqrt_pos.mpr
+    (PhysicalWaveSum.physicalQ_pos outgoing.data.h_pos outgoing.data.h_lt_half ht))).mp hr
+
+theorem signed_support (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    MixedDiagonalExtensions.SublevelShrinkingSupport h PhysicalStageSupport.actualOuterConstant
+        (ActualCandidateConstruction.qbig B N0) (signedPotential B N0 hN j) ∧
+      MixedDiagonalExtensions.SublevelShrinkingSupport h PhysicalStageSupport.actualOuterConstant
+        (ActualCandidateConstruction.qbig B N0) (signedPressure B N0 hN j) :=
+  ⟨support_of_exterior_zero (fun _ ht he => (signed_zero_germs B N0 hN j ht he).1.eq_of_nhds),
+    support_of_exterior_zero (fun _ ht he => (signed_zero_germs B N0 hN j ht he).2.eq_of_nhds)⟩
+
+theorem axis_not_active {w : SpaceTime} (ht : w ∈ PhysicalWaveSum.preterminal)
+    (ha : PhysicalGraphBounds.radialProjection w = 0) : w ∉ ActualPolarCoverage.active := by
+  intro hm
+  have hr := ((ActualCurrentWaveSupport.profileRadius_mem_iff_active ht).mpr hm).1
+  rw [ActualCurrentWaveSupport.profileRadius_zero_of_axis h ha] at hr
+  exact (not_le_of_gt (PrimaryTargetBounds.leftRadius_pos nominal)) hr
+
+theorem signed_axisZeroOn (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    GermCandidateAssembly.AxisZeroOn
+      (MixedAxisPreservation.localDomain h (ActualCandidateConstruction.qbig B N0))
+      (signedPotential B N0 hN j) := by
+  intro w hw ha
+  exact (signed_zero_germs B N0 hN j hw.1 (axis_not_active hw.1 ha)).1
+
+theorem positivePotential_support (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    MixedDiagonalExtensions.SublevelShrinkingSupport h PhysicalStageSupport.actualOuterConstant
+      (ActualCandidateConstruction.qbig B N0) (positivePotential B N0 hN j) :=
+  PhysicalStageSupport.support_add
+    (PhysicalStageSupport.support_add (particular_support B N0 hN j).1 (signed_support B N0 hN j).1)
+    (ActualCandidateConstruction.streamMeanStages_shrinkingSupport (meanCycleInput B N0 hN) (j + 1))
+
+theorem positivePressure_support (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    MixedDiagonalExtensions.SublevelShrinkingSupport h PhysicalStageSupport.actualOuterConstant
+      (ActualCandidateConstruction.qbig B N0) (positivePressure B N0 hN j) :=
+  PhysicalStageSupport.support_add
+    (PhysicalStageSupport.support_add (particular_support B N0 hN j).2 (signed_support B N0 hN j).2)
+    (ActualCandidateConstruction.pressureMeanStages_shrinkingSupport (meanCycleInput B N0 hN) (j + 1))
+
+theorem directStages_support (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    MixedDiagonalExtensions.SublevelShrinkingSupport h PhysicalStageSupport.actualOuterConstant
+      (ActualCandidateConstruction.qbig B N0) (directStages B N0 hN j) := by
+  rw [directStages_eq]
+  exact ActualCandidateConstruction.angularMeanStages_shrinkingSupport (meanCycleInput B N0 hN) j
+
+theorem positivePotential_axisZeroOn (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    GermCandidateAssembly.AxisZeroOn
+      (MixedAxisPreservation.localDomain h (ActualCandidateConstruction.qbig B N0))
+      (positivePotential B N0 hN j) :=
+  ((particular_axisZeroOn B N0 hN j).add (signed_axisZeroOn B N0 hN j)).add
+    (stream_axisZeroOn (meanCycleInput B N0 hN) (j + 1))
+
+theorem positive_exterior (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) {w : SpaceTime}
+    (hw : w ∈ ActualCandidateConstruction.physicalDomain B N0)
+    (he : w ∉ ActualPolarCoverage.active) :
+    positivePotential B N0 hN j w = 0 ∧ positivePressure B N0 hN j w = 0 := by
+  have hp := particular_zero_germs B N0 hN j hw he
+  have hs := signed_zero_germs B N0 hN j hw.1 he
+  constructor
+  · simp only [positivePotential, Pi.add_apply, hp.1.eq_of_nhds, hs.1.eq_of_nhds,
+      stream_exterior (meanCycleInput B N0 hN) (j + 1) hw.1 hw.2.le he, add_zero]
+  · simp only [positivePressure, Pi.add_apply, hp.2.eq_of_nhds, hs.2.eq_of_nhds,
+      meanPressure_exterior (meanCycleInput B N0 hN) (j + 1) hw.1 hw.2.le he, add_zero]
+
+theorem exteriorStages (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    ActualExteriorPrefix.ExteriorStages B (ActualCandidateConstruction.residualBand B N0)
+      (potentialStages B N0 hN) (directStages B N0 hN) (pressureStages B N0 hN) := by
+  have hsub {w : SpaceTime}
+      (hw : w ∈ ActualExteriorPrefix.exteriorDomain (ActualCandidateConstruction.residualBand B N0)) :
+      w ∈ ActualCandidateConstruction.physicalDomain B N0 :=
+    ⟨hw.1.1, hw.2.2.trans_le (ActualPrimaryCovariance.Q_antitone
+      (ActualCandidateConstruction.firstBand_le_residualBand B N0))⟩
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
+  · intro w hw
+    rw [potentialStages_zero]
+    change _ + initialPotential B N0 w = _
+    rw [initialPotential_exterior B N0 (hsub hw).1 (hsub hw).2.le hw.1.2, add_zero]
+  · intro j w hw
+    exact (positive_exterior B N0 hN j (hsub hw) hw.1.2).1
+  · intro j w hw
+    exact direct_exterior (meanCycleInput B N0 hN) j (hsub hw).1 (hsub hw).2.le hw.1.2
+  · intro w hw
+    rw [pressureStages_zero]
+    change _ + initialPressure B N0 w = _
+    rw [initialPressure_exterior B N0 (hsub hw).1 (hsub hw).2.le hw.1.2, add_zero]
+  · intro j w hw
+    exact (positive_exterior B N0 hN j (hsub hw) hw.1.2).2
+
+theorem particularPotential_on_chart (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j n : ℕ)
+    (hn : ActualCandidateConstruction.firstBand B N0 ≤ n)
+    {a : ℝ} (ha : 0 < a) (i : PolarCharts.Index) :
+    EqOn (SpatialCurl.spatialCurl (particularPotential B N0 j))
+      (CyclePhysicalPrefixes.polarVelocityMap a i
+        (CyclePhysicalPrefixes.velocityMap (ActualCandidateConstruction.graph n)
+          ((ActualCandidateConstruction.parameters B N0).particularVelocity
+            (ActualCandidateConstruction.cycle B N0 j).coefficients (commonContext B)
+            (ActualCandidateConstruction.cycle B N0 j).state n)))
+      (ActualPhysicalPrefixFields.cartesianChartDomain
+        (ActualCandidateConstruction.qbig B N0) n a i) := by
+  intro w hw
+  have he := ActualValidBandWaves.potential_curl_germ
+    (ActualCyclePreservation.state_invariant B N0 hN j)
+    (ActualCyclePreservation.state_coherent B N0 hN j) hN
+    ActualCoreSupport.refinedCarrier_closed (fun _ _ => Subset.rfl)
+    (ActualCandidateConstruction.firstBand B N0) n hn (chartDomain_band B N0 n ha i hw)
+  exact he.eq_of_nhds.trans (ActualCurrentParticularAssembly.localPotential_curl_eqOn
+    (ActualCyclePreservation.state_invariant B N0 hN j) hN
+    (ActualCandidateConstruction.qbig B N0) n ha i hw)
+
+theorem particularPressure_on_chart (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j n : ℕ)
+    (hn : ActualCandidateConstruction.firstBand B N0 ≤ n)
+    {a : ℝ} (ha : 0 < a) (i : PolarCharts.Index) :
+    EqOn (particularPressure B N0 j)
+      (CyclePhysicalPrefixes.polarPressureMap a i
+        (CyclePhysicalPrefixes.pressureMap (ActualCandidateConstruction.graph n)
+          ((ActualCandidateConstruction.parameters B N0).particularPressure
+            (ActualCandidateConstruction.cycle B N0 j).coefficients (commonContext B)
+            (ActualCandidateConstruction.cycle B N0 j).state n)))
+      (ActualPhysicalPrefixFields.cartesianChartDomain
+        (ActualCandidateConstruction.qbig B N0) n a i) := by
+  intro w hw
+  have he := (ActualValidBandWaves.fields_eq
+    (ActualCyclePreservation.state_invariant B N0 hN j)
+    (ActualCyclePreservation.state_coherent B N0 hN j) hN
+    ActualCoreSupport.refinedCarrier_closed (fun _ _ => Subset.rfl)
+    (ActualCandidateConstruction.firstBand B N0) n hn (chartDomain_band B N0 n ha i hw)).2
+  exact he.trans (ActualCurrentParticularAssembly.localPressure_eqOn
+    (ActualCyclePreservation.state_invariant B N0 hN j)
+    (ActualCandidateConstruction.qbig B N0) n ha i hw)
+
+/-! ## The quantitative component record uses these exact sequences -/
+
+theorem representations_of_signed_eqOn (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0)
+    {D : Type} [NormedAddCommGroup D] [NormedSpace ℝ D] {I K : Type*}
+    (W : GluedStageEstimates.SignedInputs D I K)
+    (hA : ∀ j, EqOn (W.potential j).vector (signedPotential B N0 hN j)
+      (ActualCandidateConstruction.physicalDomain B N0))
+    (hP : ∀ j, EqOn (W.pressure j).pressure (signedPressure B N0 hN j)
+      (ActualCandidateConstruction.physicalDomain B N0)) :
+    GluedStageEstimates.ActualRepresentations (runData B N0 hN) (meanCycleInput B N0 hN)
+      (ActualCandidateConstruction.firstBand_four B N0) W (ActualCandidateConstruction.qbig B N0)
+      (potentialStages B N0 hN) (directStages B N0 hN) (pressureStages B N0 hN) := by
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩
+  · intro w _
+    rw [potentialStages_zero, zerothPotential_eq_initialPotential]
+  · intro w _
+    rw [directStages_zero]
+    rfl
+  · intro w _
+    rw [pressureStages_zero, zerothPressure, initialPressure_eq_increment]
+    rfl
+  · intro j w hw
+    rw [potentialStages_succ]
+    change particularPotential B N0 j w + (W.potential j).vector w +
+        ((ActualMeanPhysicalData.initialCycleData (meanCycleInput B N0 hN)).temporalFamily j).angularField w +
+        ((ActualMeanPhysicalData.initialCycleData (meanCycleInput B N0 hN)).rankFamily j).angularField w = _
+    erw [hA j hw, positivePotential,
+      ActualCandidateConstruction.streamMeanStages_succ (meanCycleInput B N0 hN),
+      ActualMeanPhysicalData.CycleData.stream_angularField]
+    simp only [Pi.add_apply, add_assoc]
+  · intro j w _
+    rw [directStages_eq, ActualCandidateConstruction.angularMeanStages_succ (meanCycleInput B N0 hN)]
+    rfl
+  · intro j w hw
+    rw [pressureStages_succ]
+    change particularPressure B N0 j w + (W.pressure j).pressure w +
+        ((ActualMeanPhysicalData.initialCycleData (meanCycleInput B N0 hN)).pressureIncrementFamily j).field w = _
+    rw [hP j hw, positivePressure,
+      ActualCandidateConstruction.pressureMeanStages_succ (meanCycleInput B N0 hN)]
+    rfl
+
+theorem stages_smooth_of_signed_eqOn (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0)
+    {D : Type} [NormedAddCommGroup D] [NormedSpace ℝ D] {I K : Type*}
+    (W : GluedStageEstimates.SignedInputs D I K)
+    (hA : ∀ j, EqOn (W.potential j).vector (signedPotential B N0 hN j)
+      (ActualCandidateConstruction.physicalDomain B N0))
+    (hP : ∀ j, EqOn (W.pressure j).pressure (signedPressure B N0 hN j)
+      (ActualCandidateConstruction.physicalDomain B N0)) :
+    (∀ j, ContDiffOn ℝ ∞ (potentialStages B N0 hN j)
+      (ActualCandidateConstruction.physicalDomain B N0)) ∧
+    (∀ j, ContDiffOn ℝ ∞ (directStages B N0 hN j)
+      (ActualCandidateConstruction.physicalDomain B N0)) ∧
+    (∀ j, ContDiffOn ℝ ∞ (pressureStages B N0 hN j)
+      (ActualCandidateConstruction.physicalDomain B N0)) := by
+  have e := representations_of_signed_eqOn B N0 hN W hA hP
+  refine ⟨?_, ?_, ?_⟩
+  · intro j
+    exact GluedStageEstimates.Representations.potential_smooth
+      (runData B N0 hN) (meanCycleInput B N0 hN)
+      (ActualCandidateConstruction.firstBand_four B N0) W _ _ le_rfl _ _ e
+      (fun k => (particular_smooth B N0 hN k).1) j
+  · intro j
+    exact GluedStageEstimates.Representations.direct_smooth
+      (runData B N0 hN) (meanCycleInput B N0 hN)
+      (ActualCandidateConstruction.firstBand_four B N0) W _ _ le_rfl _ _ e j
+  · intro j
+    exact GluedStageEstimates.Representations.pressure_smooth
+      (runData B N0 hN) (meanCycleInput B N0 hN)
+      (ActualCandidateConstruction.firstBand_four B N0) W _ _ le_rfl _ _ e
+      (fun k => (particular_smooth B N0 hN k).2) j
+
+theorem signedPotential_eq_native (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    EqOn ((ActualSignedWaveData.signedInputs B N0 hN).potential j).vector
+      (signedPotential B N0 hN j) PhysicalWaveSum.preterminal :=
+  ActualSignedWaveData.signedInputs_potential_eq B N0 hN j
+
+theorem signedPressure_eq_native (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    EqOn ((ActualSignedWaveData.signedInputs B N0 hN).pressure j).pressure
+      (signedPressure B N0 hN j) PhysicalWaveSum.preterminal :=
+  ActualSignedWaveData.signedInputs_pressure_eq B N0 hN j
+
+theorem signedPotential_smooth (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    ContDiffOn ℝ ∞ (signedPotential B N0 hN j) PhysicalWaveSum.preterminal :=
+  (((ActualSignedWaveData.signedInputs B N0 hN).potential j).vector_smooth
+    outgoing.data.h_pos outgoing.data.h_lt_half).congr
+      (fun _ hw => (signedPotential_eq_native B N0 hN j hw).symm)
+
+theorem signedPressure_smooth (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    ContDiffOn ℝ ∞ (signedPressure B N0 hN j) PhysicalWaveSum.preterminal :=
+  (((ActualSignedWaveData.signedInputs B N0 hN).pressure j).pressure_smooth
+    outgoing.data.h_pos outgoing.data.h_lt_half).congr
+      (fun _ hw => (signedPressure_eq_native B N0 hN j hw).symm)
+
+theorem representations (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    GluedStageEstimates.ActualRepresentations (runData B N0 hN) (meanCycleInput B N0 hN)
+      (ActualCandidateConstruction.firstBand_four B N0) (ActualSignedWaveData.signedInputs B N0 hN)
+      (ActualCandidateConstruction.qbig B N0)
+      (potentialStages B N0 hN) (directStages B N0 hN) (pressureStages B N0 hN) :=
+  representations_of_signed_eqOn B N0 hN (ActualSignedWaveData.signedInputs B N0 hN)
+    (fun j _ hw => signedPotential_eq_native B N0 hN j hw.1)
+    (fun j _ hw => signedPressure_eq_native B N0 hN j hw.1)
+
+theorem stages_smooth (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    (∀ j, ContDiffOn ℝ ∞ (potentialStages B N0 hN j)
+      (ActualCandidateConstruction.physicalDomain B N0)) ∧
+    (∀ j, ContDiffOn ℝ ∞ (directStages B N0 hN j)
+      (ActualCandidateConstruction.physicalDomain B N0)) ∧
+    (∀ j, ContDiffOn ℝ ∞ (pressureStages B N0 hN j)
+      (ActualCandidateConstruction.physicalDomain B N0)) :=
+  stages_smooth_of_signed_eqOn B N0 hN (ActualSignedWaveData.signedInputs B N0 hN)
+    (fun j _ hw => signedPotential_eq_native B N0 hN j hw.1)
+    (fun j _ hw => signedPressure_eq_native B N0 hN j hw.1)
+
+theorem postParticular_coherent (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    ActualCycleCoherence.StateCoherent
+      (ActualParticularMeanGain.postParticular (ActualCandidateConstruction.cycle B N0 j)) :=
+  ActualCycleCoherence.afterParticular_coherent
+    (ActualCyclePreservation.state_invariant B N0 hN j)
+    (ActualCyclePreservation.state_waveData B N0 hN j)
+    (ActualCyclePreservation.state_coherent B N0 hN j)
+    (fun n m k hi => (ActualCyclePreservation.state_wave_transport B N0 hN j n m k hi).particular)
+
+theorem signed_amplitude_bound (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ)
+    (l : ActualInitialization.Index B N0) :
+    CurrentSignedCurl.AmplitudeBound l
+      (ActualParticularMeanGain.postParticular (ActualCandidateConstruction.cycle B N0 j))
+      ((1 + ActualIterationLedger.sigma j - ChartScales.kappa) - 1 / 2) :=
+  CurrentSignedCurl.amplitudeBound_of_mean l _ _
+    (postParticularResult B N0 hN j).primitive (postParticularResult B N0 hN j).reconstructed
+    (postParticularResult B N0 hN j).theta (postParticularResult B N0 hN j).axial
+
+theorem zerothPotential_on_chart (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (n : ℕ)
+    (hn : ActualCandidateConstruction.firstBand B N0 ≤ n)
+    {a : ℝ} (ha : 0 < a) (i : PolarCharts.Index) :
+    EqOn (SpatialCurl.spatialCurl (zerothPotential B N0))
+      (ActualCandidateConstruction.chartPotentialParts B N0 a i n 0)
+      (ActualPhysicalPrefixFields.cartesianChartDomain
+        (ActualCandidateConstruction.qbig B N0) n a i) := by
+  have hU := CutStageEstimates.physicalSublevel_open outgoing.data.h_pos
+    outgoing.data.h_lt_half (ActualCandidateConstruction.qbig B N0)
+  have hb : ContDiffOn ℝ ∞ (TailGaugePotential.finalPotential certificate modulation upper B)
+      (ActualCandidateConstruction.physicalDomain B N0) :=
+    (TailGaugePotential.finalPotential_smooth certificate modulation upper B).mono
+      (fun _ hw => ⟨hw.1, mem_univ _⟩)
+  have hwave : ContDiffOn ℝ ∞ (InitialPhysicalData.potential B N0)
+      (ActualCandidateConstruction.physicalDomain B N0) :=
+    (InitialPhysicalData.potential_smooth B N0).mono (fun _ hw => hw.1)
+  have hmean := ActualCandidateConstruction.streamMeanStages_smooth (meanCycleInput B N0 hN) 0
+  intro w hw
+  have hi : SpatialCurl.spatialCurl (initialPotential B N0) w =
+      SpatialCurl.spatialCurl (InitialPhysicalData.potential B N0) w +
+        SpatialCurl.spatialCurl (ActualCandidateConstruction.streamMeanStages B N0 0) w :=
+    InitializedPhysicalBackground.spatialCurl_add_on hU hwave hmean hw.1
+  calc
+    _ = SpatialCurl.spatialCurl (TailGaugePotential.finalPotential certificate modulation upper B) w +
+        SpatialCurl.spatialCurl (initialPotential B N0) w :=
+      InitializedPhysicalBackground.spatialCurl_add_on hU hb (initialPotential_smooth B N0) hw.1
+    _ = ActualCandidateConstruction.chartBaseVelocity B a i n w +
+        (ActualCandidateConstruction.chartWaveParts B N0 a i n 0 w +
+          ActualCandidateConstruction.chartStreamParts B N0 a i n 0 w) := by
+      rw [ActualCandidateConstruction.basePotential_curl_on_chart B ha i n hw.1.1 hw.2.1, hi,
+        initialWavePotential_on_chart B N0 n ha i hw,
+        stream_on_chart (meanCycleInput B N0 hN) 0 n hn ha i hw]
+    _ = _ := by
+      rw [ActualCandidateConstruction.chartPotentialParts_zero]
+      simp only [Pi.add_apply, add_assoc]
+
+theorem zerothPressure_on_chart (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (n : ℕ)
+    (hn : ActualCandidateConstruction.firstBand B N0 ≤ n)
+    {a : ℝ} (ha : 0 < a) (i : PolarCharts.Index) :
+    EqOn (zerothPressure B N0)
+      (ActualCandidateConstruction.chartPressureStages B N0 a i n 0)
+      (ActualPhysicalPrefixFields.cartesianChartDomain
+        (ActualCandidateConstruction.qbig B N0) n a i) := by
+  intro w hw
+  change FinalSlowBase.pressure certificate modulation upper B w +
+    (InitialPhysicalData.pressure B N0 w +
+      ActualCandidateConstruction.pressureMeanStages B N0 0 w) = _
+  rw [← ActualCandidateConstruction.chartBasePressure_eq B ha i n hw.2.1,
+    initialWavePressure_on_chart B N0 n ha i hw,
+    meanPressure_on_chart (meanCycleInput B N0 hN) 0 n hn ha i hw,
+    ActualCandidateConstruction.chartPressureParts_zero]
+  simp only [Pi.add_apply, add_assoc]
+
+theorem signedPotential_on_chart (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j n : ℕ)
+    {a : ℝ} (ha : 0 < a) (i : PolarCharts.Index) :
+    EqOn (SpatialCurl.spatialCurl (signedPotential B N0 hN j))
+      (CyclePhysicalPrefixes.polarVelocityMap a i
+        (CyclePhysicalPrefixes.velocityMap (ActualCandidateConstruction.graph n)
+          ((ActualCandidateConstruction.parameters B N0).signedVelocity
+            (ActualCandidateConstruction.cycle B N0 j).coefficients (commonContext B)
+            (ActualCandidateConstruction.cycle B N0 j).state n)))
+      (ActualPhysicalPrefixFields.cartesianChartDomain
+        (ActualCandidateConstruction.qbig B N0) n a i) :=
+  ActualSignedPhysicalCoherence.cyclePotential_curl (ActualCandidateConstruction.cycle B N0 j)
+    (postParticularResult B N0 hN j).primitive
+    (ActualSignedPhysicalBinding.afterParticular_pressure _ (postParticularResult B N0 hN j).primitive)
+    (congrArg (fun u : CorrectionState.State ActualSignedCoherence.Point => u.pressure)
+      (postParticularResult B N0 hN j).reconstructed)
+    (postParticular_coherent B N0 hN j) (ActualCyclePreservation.state_coherent B N0 hN j).labels
+    n (fun l _ => signed_amplitude_bound B N0 hN j l) ha i
+
+theorem signedPressure_on_chart (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j n : ℕ)
+    {a : ℝ} (ha : 0 < a) (i : PolarCharts.Index) :
+    EqOn (signedPressure B N0 hN j)
+      (CyclePhysicalPrefixes.polarPressureMap a i
+        (CyclePhysicalPrefixes.pressureMap (ActualCandidateConstruction.graph n)
+          ((ActualCandidateConstruction.parameters B N0).signedPressure
+            (ActualCandidateConstruction.cycle B N0 j).coefficients (commonContext B)
+            (ActualCandidateConstruction.cycle B N0 j).state n)))
+      (ActualPhysicalPrefixFields.cartesianChartDomain
+        (ActualCandidateConstruction.qbig B N0) n a i) :=
+  ActualSignedPhysicalCoherence.cyclePressure_eq (ActualCandidateConstruction.cycle B N0 j)
+    (postParticularResult B N0 hN j).primitive
+    (ActualSignedPhysicalBinding.afterParticular_pressure _ (postParticularResult B N0 hN j).primitive)
+    (congrArg (fun u : CorrectionState.State ActualSignedCoherence.Point => u.pressure)
+      (postParticularResult B N0 hN j).reconstructed)
+    (postParticular_coherent B N0 hN j) (ActualCyclePreservation.state_coherent B N0 hN j).labels n ha i
+
+theorem positivePotential_curl (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j : ℕ) :
+    EqOn (SpatialCurl.spatialCurl (positivePotential B N0 hN j))
+      (fun w => SpatialCurl.spatialCurl (particularPotential B N0 j) w +
+        SpatialCurl.spatialCurl (signedPotential B N0 hN j) w +
+        SpatialCurl.spatialCurl (ActualCandidateConstruction.streamMeanStages B N0 (j + 1)) w)
+      (ActualCandidateConstruction.physicalDomain B N0) := by
+  have hU := CutStageEstimates.physicalSublevel_open outgoing.data.h_pos
+    outgoing.data.h_lt_half (ActualCandidateConstruction.qbig B N0)
+  have hp := (particular_smooth B N0 hN j).1
+  have hs : ContDiffOn ℝ ∞ (signedPotential B N0 hN j)
+      (ActualCandidateConstruction.physicalDomain B N0) :=
+    (signedPotential_smooth B N0 hN j).mono (fun _ hw => hw.1)
+  have hm := ActualCandidateConstruction.streamMeanStages_smooth (meanCycleInput B N0 hN) (j + 1)
+  intro w hw
+  change SpatialCurl.spatialCurl
+    (fun z => (particularPotential B N0 j z + signedPotential B N0 hN j z) +
+      ActualCandidateConstruction.streamMeanStages B N0 (j + 1) z) w = _
+  rw [InitializedPhysicalBackground.spatialCurl_add_on hU (hp.add hs) hm hw]
+  dsimp only
+  rw [InitializedPhysicalBackground.spatialCurl_add_on hU hp hs hw]
+
+theorem positivePotential_on_chart (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j n : ℕ)
+    (hn : ActualCandidateConstruction.firstBand B N0 ≤ n)
+    {a : ℝ} (ha : 0 < a) (i : PolarCharts.Index) :
+    EqOn (SpatialCurl.spatialCurl (positivePotential B N0 hN j))
+      (ActualCandidateConstruction.chartPotentialParts B N0 a i n (j + 1))
+      (ActualPhysicalPrefixFields.cartesianChartDomain
+        (ActualCandidateConstruction.qbig B N0) n a i) := by
+  intro w hw
+  rw [positivePotential_curl B N0 hN j hw.1]
+  dsimp only
+  rw [particularPotential_on_chart B N0 hN j n hn ha i hw,
+    signedPotential_on_chart B N0 hN j n ha i hw,
+    stream_on_chart (meanCycleInput B N0 hN) (j + 1) n hn ha i hw,
+    ActualCandidateConstruction.chartPotentialParts_succ]
+  simp only [ActualCandidateConstruction.chartWaveParts, map_add, Pi.add_apply]
+
+theorem positivePressure_on_chart (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j n : ℕ)
+    (hn : ActualCandidateConstruction.firstBand B N0 ≤ n)
+    {a : ℝ} (ha : 0 < a) (i : PolarCharts.Index) :
+    EqOn (positivePressure B N0 hN j)
+      (ActualCandidateConstruction.chartPressureStages B N0 a i n (j + 1))
+      (ActualPhysicalPrefixFields.cartesianChartDomain
+        (ActualCandidateConstruction.qbig B N0) n a i) := by
+  intro w hw
+  change particularPressure B N0 j w + signedPressure B N0 hN j w +
+    ActualCandidateConstruction.pressureMeanStages B N0 (j + 1) w = _
+  rw [particularPressure_on_chart B N0 hN j n hn ha i hw,
+    signedPressure_on_chart B N0 hN j n ha i hw,
+    meanPressure_on_chart (meanCycleInput B N0 hN) (j + 1) n hn ha i hw,
+    ActualCandidateConstruction.chartPressureParts_succ]
+  simp only [ActualCandidateConstruction.chartWavePressureParts, map_add, Pi.add_apply]
+
+theorem stageRealizations (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    ActualPhysicalPrefixFields.StageRealizations B N0 (ActualCandidateConstruction.residualBand B N0)
+      (ActualCandidateConstruction.parameterSequence B N0) (ActualCandidateConstruction.qbig B N0)
+      (potentialStages B N0 hN) (directStages B N0 hN) (pressureStages B N0 hN) := by
+  refine ⟨?_, ?_, ?_⟩
+  · intro n hn a ha i k
+    have hn' := (ActualCandidateConstruction.firstBand_le_residualBand B N0).trans hn
+    cases k with
+    | zero => exact zerothPotential_on_chart B N0 hN n hn' ha i
+    | succ j => exact positivePotential_on_chart B N0 hN j n hn' ha i
+  · intro n hn a ha i k
+    exact direct_on_chart (meanCycleInput B N0 hN) k n
+      ((ActualCandidateConstruction.firstBand_le_residualBand B N0).trans hn) ha i
+  · intro n hn a ha i k
+    have hn' := (ActualCandidateConstruction.firstBand_le_residualBand B N0).trans hn
+    cases k with
+    | zero => exact zerothPressure_on_chart B N0 hN n hn' ha i
+    | succ j => exact positivePressure_on_chart B N0 hN j n hn' ha i
+
+theorem physicalData (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    ∀ J, ActualCycleResidualBounds.PhysicalData B (ActualCandidateConstruction.residualBand B N0)
+      (ActualCandidateConstruction.cycle B N0 J).state
+      (MixedDiagonalResidual.uncutVelocity (potentialStages B N0 hN) (directStages B N0 hN) J)
+      (DiagonalJetBounds.uncutPrefix (pressureStages B N0 hN) (J + 1)) :=
+  ActualPhysicalPrefixFields.physicalFields_all (stageRealizations B N0 hN) (exteriorStages B N0 hN)
+    (ActualCandidateConstruction.twice_residual_scale B N0).le
+    (stages_smooth B N0 hN).1 (stages_smooth B N0 hN).2.1 (stages_smooth B N0 hN).2.2
+    (ActualCandidateConstruction.cycle_representation B N0)
+
+noncomputable def estimates (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    MixedCandidateAssembly.StageEstimates h (ActualCandidateConstruction.qbig B N0)
+      (potentialStages B N0 hN) (directStages B N0 hN) (pressureStages B N0 hN) :=
+  GluedStageEstimates.actualStageEstimates (runData B N0 hN) (meanCycleInput B N0 hN)
+    (ActualCandidateConstruction.firstBand_four B N0) (ActualSignedWaveData.signedInputs B N0 hN)
+    (ActualCyclePreservation.state_coherent B N0 hN) le_rfl
+    (ActualCandidateConstruction.qbig_pos B N0) hN _ _ _
+    (representations B N0 hN) (physicalData B N0 hN)
+
+theorem endpoints (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    ActualEndpointInputs.EndpointInputs h (ActualCandidateConstruction.qbig B N0)
+      (potentialStages B N0 hN) (directStages B N0 hN) (pressureStages B N0 hN) := by
+  apply GermEndpointInputs.actual_germ_stage_endpoints_of_estimates B N0
+    (ActualCandidateConstruction.firstBand B N0) (ActualCandidateConstruction.firstBand_four B N0)
+    le_rfl (initialPotential B N0) (positivePotential B N0 hN) (directData B N0 hN)
+    (initialPressure B N0) (positivePressure B N0 hN) (estimates B N0 hN)
+  · intro w _
+    rfl
+  · intro w _
+    change directStages B N0 hN 0 w = _
+    rw [directStages_zero]
+    rfl
+  · intro w _
+    rfl
+
+/-! ## The common schedule and its actual fields -/
+
+/-- The output retains the actual three sums, the smooth force, and the
+strong consequences for this same velocity and pressure. -/
+def Witness (B N0 : ℕ) (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) : Prop :=
+  ∃ a : ℕ → ℕ,
+    MixedCandidateWitness.SelectedSchedule h (ActualCandidateConstruction.qbig B N0)
+      (potentialStages B N0 hN) (directStages B N0 hN) (pressureStages B N0 hN) a ∧
+    let ASum := SolenoidalDiagonal.potentialSum (fun j => (a j : ℝ))
+      (PhysicalWaveSum.physicalQ h) (potentialStages B N0 hN)
+    let BSum := SolenoidalDiagonal.potentialSum (fun j => (a j : ℝ))
+      (PhysicalWaveSum.physicalQ h) (directStages B N0 hN)
+    let PSum := SolenoidalDiagonal.potentialSum (fun j => (a j : ℝ))
+      (PhysicalWaveSum.physicalQ h) (pressureStages B N0 hN)
+    ∃ (ea : JointResidualLimits.AwayExtensions ASum)
+      (eb : JointResidualLimits.AwayExtensions BSum)
+      (ep : JointResidualLimits.AwayExtensions PSum),
+    ∃ forcing : VelocityField,
+      CandidateProperties
+        (TimeLocalization.activatedVelocity (MixedPeriodicAssembly.periodicVelocity ASum BSum))
+        (TimeLocalization.activatedPressure (SpatialLocalization.periodicPressure PSum)) forcing ∧
+      ContDiff ℝ ∞ forcing ∧
+      CandidateConsequences.Consequences
+        (TimeLocalization.activatedVelocity (MixedPeriodicAssembly.periodicVelocity ASum BSum))
+        (TimeLocalization.activatedPressure (SpatialLocalization.periodicPressure PSum)) forcing ∧
+      Tendsto (fun t => PeriodicSobolev.derivativeH3Norm (fun x =>
+        TimeLocalization.activatedVelocity (MixedPeriodicAssembly.periodicVelocity ASum BSum) (t, x)))
+        (𝓝[<] (1 : ℝ)) atTop ∧
+      (∀ m : ℕ, ∀ K : ℝ, 0 ≤ K → ∃ C : ℝ, 0 < C ∧
+        ∀ t : ℝ, 0 ≤ t → ∀ x : Space, ∀ directions : Fin m → Fin 4, ∀ j : Fin 3,
+          |(iteratedFDeriv ℝ m forcing (t, x)
+            (fun i => CompactForceDecay.spacetimeCoordinate (directions i))) j| ≤
+              C * (1 + t) ^ (-K)) ∧
+      (∀ n : ℕ, ∀ x : Space, iteratedFDeriv ℝ n forcing (1, x) =
+        MixedPeriodicAssembly.boundaryLimits ASum BSum PSum ea eb ep x n)
+
+theorem witness (B N0 : ℕ) (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    Witness B N0 hN :=
+  GermCandidateAssembly.exists_candidate_witness_of_finite_stages certificate modulation upper B
+    (ActualCandidateConstruction.qbig_pos B N0) (initialPotential B N0) (positivePotential B N0 hN)
+    (directData B N0 hN) (initialPressure B N0) (positivePressure B N0 hN) (estimates B N0 hN)
+    (initialPotential_support B N0) (positivePotential_support B N0 hN) (directStages_support B N0 hN)
+    (initialPressure_support B N0) (positivePressure_support B N0 hN)
+    (endpoints B N0 hN).potential (endpoints B N0 hN).direct (endpoints B N0 hN).pressure
+    (initialPotential_axisZeroOn B N0) (positivePotential_axisZeroOn B N0 hN)
+
+/-! One closed choice fixes all three raw sequences together. -/
+
+noncomputable def selectedPotentialStages : ℕ → VelocityField :=
+  potentialStages ActualCandidateConstruction.selectedBudget ActualCandidateConstruction.selectedThreshold
+    ActualCandidateConstruction.selectedThreshold_geometry
+
+noncomputable def selectedDirectStages : ℕ → VelocityField :=
+  directStages ActualCandidateConstruction.selectedBudget ActualCandidateConstruction.selectedThreshold
+    ActualCandidateConstruction.selectedThreshold_geometry
+
+noncomputable def selectedPressureStages : ℕ → PressureField :=
+  pressureStages ActualCandidateConstruction.selectedBudget ActualCandidateConstruction.selectedThreshold
+    ActualCandidateConstruction.selectedThreshold_geometry
+
+theorem selected_witness :
+    Witness ActualCandidateConstruction.selectedBudget ActualCandidateConstruction.selectedThreshold
+      ActualCandidateConstruction.selectedThreshold_geometry :=
+  witness ActualCandidateConstruction.selectedBudget ActualCandidateConstruction.selectedThreshold
+    ActualCandidateConstruction.selectedThreshold_geometry
+
+theorem selected_candidate : ProblemStatement.candidateStatement := by
+  obtain ⟨a, _, ea, eb, ep, forcing, hc, _⟩ := selected_witness
+  exact ⟨_, _, forcing, hc⟩
+
+end NavierStokes.ActualCandidateAssembly
+
+
+================================================================================
+FILE: ./NavierStokesAndEuler/NavierStokes/R3/ActualCandidate.lean
+================================================================================
+import NavierStokes.R3ActualCandidate
+import NavierStokes.R3.CompactEnergy
+import NavierStokes.R3.PositiveTimeForce
+
+/-!
+# The full whole-space candidate from the selected construction
+
+The selected construction supplies its actual compact spatial fields and a
+globally smooth force. A smooth time cutoff preserves the equation and puts
+the force's entire topological support strictly inside positive time. The
+whole-space energy estimate then gives one bound up to the singular time.
+-/
+
+noncomputable section
+
+open Set Filter
+open scoped Topology ContDiff
+
+namespace NavierStokesR3.ActualCandidate
+
+open NavierStokes.ProblemStatement
+open NavierStokes
+
+theorem activatedVelocity_eventually_zero {u : VelocityField} {t : ℝ}
+    (ht : |t| < 3 / 8) (x : Space) :
+    TimeLocalization.activatedVelocity u =ᶠ[𝓝 (t, x)] (fun _ => 0) := by
+  have hn : {z : SpaceTime | |z.1| < 3 / 8} ∈ 𝓝 (t, x) :=
+    (isOpen_lt continuous_fst.abs continuous_const).mem_nhds ht
+  filter_upwards [hn] with z hz
+  exact TimeLocalization.activatedVelocity_zero_early u hz.le z.2
+
+theorem activatedPressure_eventually_zero {p : PressureField} {t : ℝ}
+    (ht : |t| < 3 / 8) (x : Space) :
+    TimeLocalization.activatedPressure p =ᶠ[𝓝 (t, x)] (fun _ => 0) := by
+  have hn : {z : SpaceTime | |z.1| < 3 / 8} ∈ 𝓝 (t, x) :=
+    (isOpen_lt continuous_fst.abs continuous_const).mem_nhds ht
+  filter_upwards [hn] with z hz
+  exact TimeLocalization.activatedPressure_zero_early p hz.le z.2
+
+theorem localized_residual_zero_early (A B : VelocityField) (P : PressureField)
+    {t : ℝ} (ht : |t| < 3 / 8) (x : Space) :
+    navierStokesResidual (R3CompactCandidate.velocity A B)
+      (R3CompactCandidate.pressure P) t x = 0 := by
+  unfold R3CompactCandidate.velocity R3CompactCandidate.pressure
+  exact ResidualRegularity.residual_eq_zero_of_eventually_zero (z := (t, x))
+    (activatedVelocity_eventually_zero
+      (u := fun z => SpatialLocalization.cutVelocity A z + SpatialLocalization.cutPotential B z)
+      ht x)
+    (activatedPressure_eventually_zero (p := SpatialLocalization.cutPressure P) ht x)
+
+theorem localized_velocity_tsupport (A B : VelocityField) (t : ℝ) :
+    tsupport (fun x : Space => R3CompactCandidate.velocity A B (t, x)) ⊆
+      SpatialLocalization.supportCylinder := by
+  apply closure_minimal _ SpatialLocalization.isClosed_supportCylinder
+  intro x hx
+  by_contra h
+  exact hx (R3CompactCandidate.velocity_supported A B t x h)
+
+theorem localized_pressure_tsupport (P : PressureField) (t : ℝ) :
+    tsupport (fun x : Space => R3CompactCandidate.pressure P (t, x)) ⊆
+      SpatialLocalization.supportCylinder := by
+  apply closure_minimal _ SpatialLocalization.isClosed_supportCylinder
+  intro x hx
+  by_contra h
+  exact hx (R3CompactCandidate.pressure_supported P t x h)
+
+theorem compactForce_smooth {f : VelocityField} (hf : ContDiff ℝ ∞ f) :
+    ContDiff ℝ ∞ (R3CompactCandidate.compactForce f) :=
+  (R3CompactCandidate.outerCutoff_smooth.comp contDiff_snd).smul hf
+
+theorem compactForce_supported_all_times (f : VelocityField) (t : ℝ) (x : Space)
+    (hx : x ∉ R3CompactCandidate.outerSupport) :
+    R3CompactCandidate.compactForce f (t, x) = 0 := by
+  simp [R3CompactCandidate.compactForce, R3CompactCandidate.outerCutoff_zero_outside hx]
+
+/-- Preserve the original localized velocity and pressure, and use a force
+whose compact support is separated from time zero. -/
+theorem of_localized_fields {A B : VelocityField} {P : PressureField} {f : VelocityField}
+    (h : NavierStokes.ProblemStatement.CandidateProperties
+      (R3CompactCandidate.periodicVelocity A B) (R3CompactCandidate.periodicPressure P) f)
+    (hf : ContDiff ℝ ∞ f) :
+    ProblemStatement.CandidateProperties 1
+      (R3CompactCandidate.velocity A B) (R3CompactCandidate.pressure P)
+      (PositiveTimeForce.force (R3CompactCandidate.compactForce f))
+      SpatialLocalization.supportCylinder := by
+  have hc := R3CompactCandidate.of_localized_fields h
+  have hF := PositiveTimeForce.force_contDiff (compactForce_smooth hf)
+  have hsupport := PositiveTimeForce.force_compactPositiveTimeSupport
+    R3CompactCandidate.outerSupport_compact (compactForce_supported_all_times f)
+  have hNS : ∀ t ∈ Ioo (0 : ℝ) 1, ∀ x : Space,
+      navierStokesResidual (R3CompactCandidate.velocity A B)
+        (R3CompactCandidate.pressure P) t x =
+        PositiveTimeForce.force (R3CompactCandidate.compactForce f) (t, x) := by
+    intro t ht x
+    by_cases hearly : t < 3 / 8
+    · have hzero := localized_residual_zero_early A B P
+        (by rwa [abs_of_pos ht.1]) x
+      have hforcezero : R3CompactCandidate.compactForce f (t, x) = 0 :=
+        (hc.navier_stokes t ht x).symm.trans hzero
+      rw [hzero, PositiveTimeForce.force_eq_zero hforcezero]
+    · rw [PositiveTimeForce.force_eq ⟨le_of_not_gt hearly, ht.2.le⟩ x]
+      exact hc.navier_stokes t ht x
+  refine {
+    velocity_smooth := hc.velocity_smooth
+    pressure_smooth := hc.pressure_smooth
+    support_compact := SpatialLocalization.isCompact_supportCylinder
+    velocity_support := fun t _ => localized_velocity_tsupport A B t
+    pressure_support := fun t _ => localized_pressure_tsupport P t
+    force_smooth := hF
+    force_support := hsupport
+    zero_initial_velocity := hc.zero_initial_velocity
+    divergence_free := hc.divergence_free
+    navier_stokes := ?_
+    energy_bounded := ?_
+    speed_unbounded := hc.speed_unbounded
+  }
+  · intro t ht x
+    simpa only [ProblemStatement.residual_at_viscosity_one] using hNS t ht x
+  · exact CompactEnergy.uniform_finite_energy SpatialLocalization.isCompact_supportCylinder
+      hc.velocity_smooth hc.pressure_smooth (fun t _ => localized_velocity_tsupport A B t)
+      hF hsupport.1 hc.zero_initial_velocity
+      (fun t ht => hc.divergence_free t ⟨ht.1.le, ht.2⟩) hNS
+
+/-- The selected physical sums satisfy every whole-space candidate property
+at viscosity one, including a single kinetic-energy bound for `0 ≤ t < 1`.
+The additional clause records the initial interval on which the flow is zero. -/
+theorem selected_candidate_one_with_early_zero :
+    ∃ u : VelocityField, ∃ p : PressureField, ∃ f : VelocityField, ∃ K : Set Space,
+      ProblemStatement.CandidateProperties 1 u p f K ∧
+        ∀ t : ℝ, |t| ≤ 3 / 8 → ∀ x : Space, u (t, x) = 0 := by
+  obtain ⟨a, _, ea, eb, ep, forcing, hc, hf, _⟩ :=
+    ActualCandidateAssembly.selected_witness
+  refine ⟨_, _, _, _, of_localized_fields hc hf, ?_⟩
+  intro t ht x
+  exact TimeLocalization.activatedVelocity_zero_early _ ht x
+
+theorem selected_candidate_one : ProblemStatement.candidateStatement 1 := by
+  obtain ⟨u, p, f, K, hc, _⟩ := selected_candidate_one_with_early_zero
+  exact ⟨u, p, f, K, hc⟩
+
+/-- Both fields are identically zero on an initial time interval, so a
+delayed parabolic rescaling can be smoothly extended by zero. -/
+theorem selected_candidate_one_with_initial_rest :
+    ∃ u : VelocityField, ∃ p : PressureField, ∃ f : VelocityField, ∃ K : Set Space,
+      ProblemStatement.CandidateProperties 1 u p f K ∧
+        ∀ t : ℝ, |t| ≤ 3 / 8 → ∀ x : Space,
+          u (t, x) = 0 ∧ p (t, x) = 0 := by
+  obtain ⟨a, _, ea, eb, ep, forcing, hc, hf, _⟩ :=
+    ActualCandidateAssembly.selected_witness
+  refine ⟨_, _, _, _, of_localized_fields hc hf, ?_⟩
+  intro t ht x
+  exact ⟨TimeLocalization.activatedVelocity_zero_early _ ht x,
+    TimeLocalization.activatedPressure_zero_early _ ht x⟩
+
+end NavierStokesR3.ActualCandidate
+
+
+================================================================================
+FILE: ./NavierStokesAndEuler/NavierStokes/MixedPeriodicAssembly.lean
+================================================================================
+import NavierStokes.PeriodicResidualLimits
+import NavierStokes.DirectAngularDiagonal
+
+/-!
+# Spatial localization of a curl field and a direct angular field
+
+The manuscript cuts direct angular means as vector fields, separately from
+the potentials whose curls give the other components.  The construction here
+keeps that distinction.  The existing spatial cutoff is axisymmetric; its
+action on direct angular means can therefore be supplied by the angular-field
+calculus.  No compactly supported potential for an arbitrary angular mean is
+postulated.
+
+The endpoint results below take the original mixed fields, their actual
+one-sided extensions, and the joint residual limits as inputs.  They construct
+the periodic fields and their residual limits.  They do not establish the
+correction iteration or the existence of singular incoming fields.
+-/
+
+noncomputable section
+
+namespace NavierStokes.MixedPeriodicAssembly
+
+open ProblemStatement Set Filter
+open scoped Topology ContDiff BigOperators
+
+/-- The direct field is added after taking the curl. -/
+def velocity (A v : VelocityField) : VelocityField :=
+  fun z => SpatialCurl.spatialCurl A z + v z
+
+/-- Spatial localization keeps every potential-cutoff derivative. -/
+def cutVelocity (A v : VelocityField) : VelocityField :=
+  fun z => SpatialLocalization.cutVelocity A z + SpatialLocalization.cutPotential v z
+
+/-- Periodize the cut potential and the cut direct field separately. -/
+def periodicVelocity (A v : VelocityField) : VelocityField :=
+  fun z => SpatialLocalization.periodicVelocity A z +
+    PeriodicLocalization.periodize (SpatialLocalization.cutPotential v) z
+
+def originalResidual (A v : VelocityField) (p : PressureField) : VelocityField :=
+  fun z => navierStokesResidual (velocity A v) p z.1 z.2
+
+def cutResidual (A v : VelocityField) (p : PressureField) : VelocityField :=
+  fun z => navierStokesResidual (cutVelocity A v)
+    (SpatialLocalization.cutPressure p) z.1 z.2
+
+def periodicResidual (A v : VelocityField) (p : PressureField) : VelocityField :=
+  fun z => navierStokesResidual (periodicVelocity A v)
+    (SpatialLocalization.periodicPressure p) z.1 z.2
+
+theorem periodicVelocity_smoothOn {A v : VelocityField} {times : Set ℝ}
+    (hA : ContDiffOn ℝ ∞ A (times ×ˢ (univ : Set Space)))
+    (hv : ContDiffOn ℝ ∞ v (times ×ˢ (univ : Set Space))) :
+    ContDiffOn ℝ ∞ (periodicVelocity A v) (times ×ˢ (univ : Set Space)) :=
+  (SpatialLocalization.periodicVelocity_smoothOn hA).add
+    (PeriodicLocalization.contDiffOn_periodize (SpatialLocalization.cutPotential_supported v)
+      ((SpatialLocalization.spatialCutoff_contDiff.comp contDiff_snd).contDiffOn.smul hv))
+
+theorem periodicVelocity_periodic (A v : VelocityField) (times : Set ℝ) :
+    UnitSpatialPeriodsOn times (periodicVelocity A v) := by
+  intro t ht x i
+  simp only [periodicVelocity,
+    SpatialLocalization.periodicVelocity_periodic A times t ht x i,
+    PeriodicLocalization.unitSpatialPeriodsOn_periodize
+      (SpatialLocalization.cutPotential v) times t ht x i]
+
+theorem periodicVelocity_eventuallyEq_cut (A v : VelocityField) {z : SpaceTime}
+    (hz : z.2 ∈ PeriodicLocalization.innerCube (1 / 4)) :
+    periodicVelocity A v =ᶠ[𝓝 z] cutVelocity A v :=
+  (SpatialLocalization.periodicVelocity_eventuallyEq_cut A hz).add
+    (PeriodicLocalization.periodize_eventuallyEq
+      (SpatialLocalization.cutPotential_supported v) hz)
+
+theorem cutVelocity_eventuallyEq (A v : VelocityField) {z : SpaceTime}
+    (hz : z.2 ∈ SpatialLocalization.plateau) :
+    cutVelocity A v =ᶠ[𝓝 z] velocity A v :=
+  (SolenoidalDiagonal.spatialCurl_eventuallyEq
+    (SpatialLocalization.cutPotential_eventuallyEq A hz)).add
+      (SpatialLocalization.cutPotential_eventuallyEq v hz)
+
+theorem periodicVelocity_eventuallyEq (A v : VelocityField) {z : SpaceTime}
+    (hz : z.2 ∈ SpatialLocalization.plateau) :
+    periodicVelocity A v =ᶠ[𝓝 z] velocity A v :=
+  (periodicVelocity_eventuallyEq_cut A v (SpatialLocalization.plateau_subset_innerCube hz)).trans
+    (cutVelocity_eventuallyEq A v hz)
+
+theorem periodicVelocity_origin (A v : VelocityField) (t : ℝ) :
+    periodicVelocity A v (t, 0) = velocity A v (t, 0) :=
+  (periodicVelocity_eventuallyEq A v SpatialLocalization.zero_mem_plateau).self_of_nhds
+
+theorem periodicResidual_eventuallyEq_cut (A v : VelocityField) (p : PressureField)
+    {z : SpaceTime} (hz : z.2 ∈ PeriodicLocalization.innerCube (1 / 4)) :
+    periodicResidual A v p =ᶠ[𝓝 z] cutResidual A v p :=
+  ResidualRegularity.residual_eventuallyEq (periodicVelocity_eventuallyEq_cut A v hz)
+    (SpatialLocalization.periodicPressure_eventuallyEq_cut p hz)
+
+theorem cutResidual_eventuallyEq_original (A v : VelocityField) (p : PressureField)
+    {z : SpaceTime} (hz : z.2 ∈ SpatialLocalization.plateau) :
+    cutResidual A v p =ᶠ[𝓝 z] originalResidual A v p :=
+  ResidualRegularity.residual_eventuallyEq (cutVelocity_eventuallyEq A v hz)
+    (SpatialLocalization.cutPressure_eventuallyEq p hz)
+
+theorem spatialDivergence_congr {u v : VelocityField} {z : SpaceTime}
+    (he : u =ᶠ[𝓝 z] v) : spatialDivergence u z.1 z.2 = spatialDivergence v z.1 z.2 := by
+  unfold spatialDivergence spatialDerivative
+  rw [ResidualRegularity.space_fderiv_congr he]
+
+theorem spatialDivergence_periodic {u : VelocityField} {times : Set ℝ}
+    (hu : UnitSpatialPeriodsOn times u) :
+    UnitSpatialPeriodsOn times (fun z => spatialDivergence u z.1 z.2) := by
+  intro t ht x i
+  unfold spatialDivergence spatialDerivative
+  have he := ResidualRegularity.space_fderiv_periods hu t ht x i
+  dsimp only at he ⊢
+  rw [he]
+
+/-- Disjoint support permits checking the divergence on one local copy.
+No convergence or differentiability of a formal infinite sum is assumed. -/
+theorem periodize_divergence_free {v : VelocityField}
+    (hs : PeriodicLocalization.SupportedInCube (1 / 4) v) (t : ℝ)
+    (hd : ∀ x, spatialDivergence v t x = 0) (x : Space) :
+    spatialDivergence (PeriodicLocalization.periodize v) t x = 0 := by
+  have hp := spatialDivergence_periodic
+    (PeriodicLocalization.unitSpatialPeriodsOn_periodize v univ)
+  have he := PeriodicLocalization.periodize_eventuallyEq hs
+    (z := (t, PeriodicResidualLimits.representative x))
+    (PeriodicResidualLimits.representative_mem_innerCube x)
+  calc
+    _ = spatialDivergence (PeriodicLocalization.periodize v) t
+        (PeriodicResidualLimits.representative x) :=
+      ((CompactForceDecay.periodic_integerShift hp t
+        (PeriodicResidualLimits.nearestIndex x)).sub_eq x).symm
+    _ = spatialDivergence v t (PeriodicResidualLimits.representative x) :=
+      spatialDivergence_congr he
+    _ = 0 := hd _
+
+theorem spatialDivergence_add {u v : VelocityField} {t : ℝ} {x : Space}
+    (hu : DifferentiableAt ℝ (fun y => u (t, y)) x)
+    (hv : DifferentiableAt ℝ (fun y => v (t, y)) x) :
+    spatialDivergence (fun z => u z + v z) t x =
+      spatialDivergence u t x + spatialDivergence v t x := by
+  simp only [spatialDivergence, spatialDerivative, fderiv_fun_add hu hv,
+    _root_.add_apply, PiLp.add_apply, Finset.sum_add_distrib]
+
+/-- The angular-field calculus supplies `hd` from axisymmetry.  The curl
+component and the lattice periodization introduce no new divergence. -/
+theorem periodicVelocity_divergence_free {A v : VelocityField} {times : Set ℝ}
+    (hA : ContDiffOn ℝ ∞ A (times ×ˢ (univ : Set Space)))
+    (hv : ContDiffOn ℝ ∞ v (times ×ˢ (univ : Set Space)))
+    (hd : ∀ t ∈ times, ∀ x, spatialDivergence (SpatialLocalization.cutPotential v) t x = 0)
+    {t : ℝ} (ht : t ∈ times) (x : Space) :
+    spatialDivergence (periodicVelocity A v) t x = 0 := by
+  have hleft := SpatialCurl.contDiff_spatialSlice
+    (SpatialLocalization.periodicVelocity_smoothOn hA) ht
+  have hright := SpatialCurl.contDiff_spatialSlice
+    (PeriodicLocalization.contDiffOn_periodize (SpatialLocalization.cutPotential_supported v)
+      ((SpatialLocalization.spatialCutoff_contDiff.comp contDiff_snd).contDiffOn.smul hv)) ht
+  change spatialDivergence (fun z => SpatialLocalization.periodicVelocity A z +
+    PeriodicLocalization.periodize (SpatialLocalization.cutPotential v) z) t x = 0
+  rw [spatialDivergence_add
+    (hleft.differentiable (by simp) x) (hright.differentiable (by simp) x),
+    SpatialLocalization.periodicVelocity_divergence_free hA ht x,
+    periodize_divergence_free (SpatialLocalization.cutPotential_supported v) t (hd t ht) x,
+    add_zero]
+
+theorem cutResidual_smoothOn {A v : VelocityField} {p : PressureField} {U : Set SpaceTime}
+    (hU : IsOpen U) (hA : ContDiffOn ℝ ∞ A U)
+    (hv : ContDiffOn ℝ ∞ v U) (hp : ContDiffOn ℝ ∞ p U) :
+    ContDiffOn ℝ ∞ (cutResidual A v p) U := by
+  have hc : ContDiffOn ℝ ∞ (fun z : SpaceTime => SpatialLocalization.spatialCutoff z.2) U :=
+    (SpatialLocalization.spatialCutoff_contDiff.comp contDiff_snd).contDiffOn
+  have hAc : ContDiffOn ℝ ∞ (SpatialLocalization.cutPotential A) U := hc.smul hA
+  have hcurl : ContDiffOn ℝ ∞ (SpatialLocalization.cutVelocity A) U := by
+    intro z hz
+    exact (SpatialCurl.contDiffAt_spatialCurl
+      (hAc.contDiffAt (hU.mem_nhds hz)) (by simp)).contDiffWithinAt
+  exact ResidualRegularity.contDiffOn_residual hU (hcurl.add (hc.smul hv)) (hc.mul hp)
+
+theorem cutResidual_eventuallyEq {A A' v v' : VelocityField} {p p' : PressureField}
+    {z : SpaceTime} (hA : A =ᶠ[𝓝 z] A') (hv : v =ᶠ[𝓝 z] v') (hp : p =ᶠ[𝓝 z] p') :
+    cutResidual A v p =ᶠ[𝓝 z] cutResidual A' v' p' := by
+  have hAc : SpatialLocalization.cutPotential A =ᶠ[𝓝 z]
+      SpatialLocalization.cutPotential A' := by
+    filter_upwards [hA] with w hw
+    simp only [SpatialLocalization.cutPotential, hw]
+  have hvc : SpatialLocalization.cutPotential v =ᶠ[𝓝 z]
+      SpatialLocalization.cutPotential v' := by
+    filter_upwards [hv] with w hw
+    simp only [SpatialLocalization.cutPotential, hw]
+  have hpc : SpatialLocalization.cutPressure p =ᶠ[𝓝 z]
+      SpatialLocalization.cutPressure p' := by
+    filter_upwards [hp] with w hw
+    simp only [SpatialLocalization.cutPressure, hw]
+  exact ResidualRegularity.residual_eventuallyEq
+    ((SolenoidalDiagonal.spatialCurl_eventuallyEq hAc).add hvc) hpc
+
+/-- All three original components have genuine smooth local extensions. -/
+def cutResidualExtension {A v : VelocityField} {p : PressureField} {x : Space}
+    (eA : JointResidualLimits.OneSidedExtension A x)
+    (ev : JointResidualLimits.OneSidedExtension v x)
+    (ep : JointResidualLimits.OneSidedExtension p x) :
+    JointResidualLimits.OneSidedExtension (cutResidual A v p) x where
+  value := cutResidual eA.value ev.value ep.value
+  domain := (eA.domain ∩ ev.domain) ∩ ep.domain
+  isOpen := (eA.isOpen.inter ev.isOpen).inter ep.isOpen
+  mem := ⟨⟨eA.mem, ev.mem⟩, ep.mem⟩
+  smooth := cutResidual_smoothOn ((eA.isOpen.inter ev.isOpen).inter ep.isOpen)
+    (eA.smooth.mono (fun _ h => h.1.1)) (ev.smooth.mono (fun _ h => h.1.2))
+    (ep.smooth.mono inter_subset_right)
+  agrees := by
+    intro z hz
+    have hO := (((eA.isOpen.inter ev.isOpen).inter ep.isOpen).inter
+      (SpacetimeEndpoint.openPast_isOpen 1))
+    apply (cutResidual_eventuallyEq (z := z) ?_ ?_ ?_).self_of_nhds
+    · filter_upwards [hO.mem_nhds hz] with w hw
+      exact eA.agrees ⟨hw.1.1.1, hw.2⟩
+    · filter_upwards [hO.mem_nhds hz] with w hw
+      exact ev.agrees ⟨hw.1.1.2, hw.2⟩
+    · filter_upwards [hO.mem_nhds hz] with w hw
+      exact ep.agrees ⟨hw.1.2, hw.2⟩
+
+theorem cutResidual_awayExtensions {A v : VelocityField} {p : PressureField}
+    (eA : JointResidualLimits.AwayExtensions A)
+    (ev : JointResidualLimits.AwayExtensions v)
+    (ep : JointResidualLimits.AwayExtensions p) :
+    JointResidualLimits.AwayExtensions (cutResidual A v p) := by
+  intro x hx
+  exact ⟨cutResidualExtension (Classical.choice (eA x hx)) (Classical.choice (ev x hx))
+    (Classical.choice (ep x hx))⟩
+
+theorem cutResidual_vanishingJointJets {A v : VelocityField} {p : PressureField}
+    (hz : JointResidualLimits.VanishingJointJets (originalResidual A v p)) :
+    JointResidualLimits.VanishingJointJets (cutResidual A v p) := by
+  intro n
+  apply (hz n).congr'
+  exact ((SolenoidalDiagonal.iteratedFDeriv_eventuallyEq
+    (cutResidual_eventuallyEq_original A v p (z := (1, 0))
+      SpatialLocalization.zero_mem_plateau) n).filter_mono nhdsWithin_le_nhds).symm
+
+theorem periodicResidual_periodic (A v : VelocityField) (p : PressureField) :
+    UnitSpatialPeriodsOn univ (periodicResidual A v p) :=
+  ResidualRegularity.residual_periods isOpen_univ
+    (periodicVelocity_periodic A v univ) (SpatialLocalization.periodicPressure_periodic p univ)
+
+theorem periodicResidual_jets_locally_cut (A v : VelocityField) (p : PressureField)
+    (x : Space) (n : ℕ) :
+    iteratedFDeriv ℝ n (periodicResidual A v p) =ᶠ[𝓝 ((1 : ℝ), x)]
+      (fun z => iteratedFDeriv ℝ n (cutResidual A v p)
+        (z.1, z.2 - CompactForceDecay.integerShift (PeriodicResidualLimits.nearestIndex x))) := by
+  have hp := CompactForceDecay.iteratedFDeriv_periods (periodicResidual_periodic A v p) n
+  have hm : Continuous (fun z : SpaceTime =>
+      z.2 - CompactForceDecay.integerShift (PeriodicResidualLimits.nearestIndex x)) :=
+    continuous_snd.sub continuous_const
+  have he : ∀ᶠ z : SpaceTime in 𝓝 ((1 : ℝ), x),
+      z.2 - CompactForceDecay.integerShift (PeriodicResidualLimits.nearestIndex x) ∈
+        PeriodicLocalization.innerCube (1 / 4) :=
+    hm.continuousAt.preimage_mem_nhds ((PeriodicLocalization.isOpen_innerCube _).mem_nhds
+      (PeriodicResidualLimits.representative_mem_innerCube x))
+  filter_upwards [he] with z hz
+  rw [← (CompactForceDecay.periodic_integerShift hp z.1
+    (PeriodicResidualLimits.nearestIndex x)).sub_eq z.2]
+  exact (SolenoidalDiagonal.iteratedFDeriv_eventuallyEq
+    (periodicResidual_eventuallyEq_cut A v p hz) n).self_of_nhds
+
+/-- Constructed tensor limits for every point, including all lattice copies
+of the singular point.  No continuity of the chosen representative is used. -/
+def boundaryLimits (A v : VelocityField) (p : PressureField)
+    (eA : JointResidualLimits.AwayExtensions A)
+    (ev : JointResidualLimits.AwayExtensions v)
+    (ep : JointResidualLimits.AwayExtensions p) (x : Space) :
+    FormalMultilinearSeries ℝ SpaceTime Space :=
+  JointResidualLimits.boundaryLimits (cutResidual A v p)
+    (cutResidual_awayExtensions eA ev ep) (PeriodicResidualLimits.representative x)
+
+@[simp] theorem boundaryLimits_zero (A v : VelocityField) (p : PressureField)
+    (eA : JointResidualLimits.AwayExtensions A)
+    (ev : JointResidualLimits.AwayExtensions v)
+    (ep : JointResidualLimits.AwayExtensions p) (n : ℕ) :
+    boundaryLimits A v p eA ev ep 0 n = 0 := by
+  simp only [boundaryLimits, PeriodicResidualLimits.representative_zero,
+    JointResidualLimits.boundaryLimits_zero]
+
+theorem boundaryLimits_joint {A v : VelocityField} {p : PressureField}
+    (hz : JointResidualLimits.VanishingJointJets (originalResidual A v p))
+    (eA : JointResidualLimits.AwayExtensions A)
+    (ev : JointResidualLimits.AwayExtensions v)
+    (ep : JointResidualLimits.AwayExtensions p) (n : ℕ) (x : Space) :
+    Tendsto (iteratedFDeriv ℝ n (periodicResidual A v p))
+      (𝓝[SpacetimeEndpoint.openPast 1] (1, x))
+      (𝓝 (boundaryLimits A v p eA ev ep x n)) := by
+  have hlim := JointResidualLimits.boundaryLimits_joint
+    (cutResidual_vanishingJointJets hz) (cutResidual_awayExtensions eA ev ep) n
+    (PeriodicResidualLimits.representative x)
+  have hc := hlim.comp (PeriodicResidualLimits.spatial_sub_tendsto_past
+    (CompactForceDecay.integerShift (PeriodicResidualLimits.nearestIndex x)) x)
+  exact hc.congr' ((periodicResidual_jets_locally_cut A v p x n).filter_mono
+    nhdsWithin_le_nhds).symm
+
+theorem boundaryLimits_continuous {A v : VelocityField} {p : PressureField}
+    (hz : JointResidualLimits.VanishingJointJets (originalResidual A v p))
+    (eA : JointResidualLimits.AwayExtensions A)
+    (ev : JointResidualLimits.AwayExtensions v)
+    (ep : JointResidualLimits.AwayExtensions p) (n : ℕ) :
+    Continuous (fun x => boundaryLimits A v p eA ev ep x n) := by
+  apply JointResidualLimits.continuous_of_joint_limits
+    (p := 𝓝[<] (1 : ℝ)) (F := iteratedFDeriv ℝ n (periodicResidual A v p))
+  intro x
+  simpa only [JointResidualLimits.past_filter] using boundaryLimits_joint hz eA ev ep n x
+
+theorem boundaryLimits_locallyUniform {A v : VelocityField} {p : PressureField}
+    (hz : JointResidualLimits.VanishingJointJets (originalResidual A v p))
+    (eA : JointResidualLimits.AwayExtensions A)
+    (ev : JointResidualLimits.AwayExtensions v)
+    (ep : JointResidualLimits.AwayExtensions p) (n : ℕ) :
+    TendstoLocallyUniformly (fun t x => iteratedFDeriv ℝ n (periodicResidual A v p) (t, x))
+      (fun x => boundaryLimits A v p eA ev ep x n) (𝓝[<] (1 : ℝ)) := by
+  apply JointResidualLimits.locallyUniform_of_joint_limits
+    (F := iteratedFDeriv ℝ n (periodicResidual A v p))
+  intro x
+  simpa only [JointResidualLimits.past_filter] using boundaryLimits_joint hz eA ev ep n x
+
+theorem periodicVelocity_speed_unbounded {A v : VelocityField}
+    (haxis : Tendsto (fun t : ℝ => ‖velocity A v (t, 0)‖) (𝓝[<] 1) atTop) :
+    SpeedUnboundedAtOne (periodicVelocity A v) := by
+  have hb : Tendsto (fun t : ℝ => ‖periodicVelocity A v (t, 0)‖) (𝓝[<] 1) atTop := by
+    simpa only [periodicVelocity_origin] using haxis
+  intro M _ δ hδ
+  have hlow : Ioi (max 0 (1 - δ)) ∈ 𝓝[<] (1 : ℝ) :=
+    mem_nhdsWithin_of_mem_nhds (Ioi_mem_nhds (max_lt (by norm_num) (by linarith)))
+  have hlarge := hb.eventually (eventually_gt_atTop M)
+  have hbefore : ∀ᶠ t in 𝓝[<] (1 : ℝ), t < 1 := self_mem_nhdsWithin
+  obtain ⟨t, ht, hMt, hlo⟩ := (hbefore.and (hlarge.and hlow)).exists
+  exact ⟨t, 0, ⟨(le_max_left _ _).trans_lt hlo, ht⟩,
+    (le_max_right _ _).trans_lt hlo, hMt⟩
+
+/-- Apply the existing force construction to the actual mixed periodic
+velocity.  All remaining analytic assumptions concern the incoming fields. -/
+theorem exists_candidate_force {A v : VelocityField} {p : PressureField}
+    (hA : ContDiffOn ℝ ∞ A (SpacetimeEndpoint.openPast 1))
+    (hv : ContDiffOn ℝ ∞ v (SpacetimeEndpoint.openPast 1))
+    (hp : ContDiffOn ℝ ∞ p (SpacetimeEndpoint.openPast 1))
+    (hd : ∀ t < 1, ∀ x, spatialDivergence (SpatialLocalization.cutPotential v) t x = 0)
+    (hz : JointResidualLimits.VanishingJointJets (originalResidual A v p))
+    (eA : JointResidualLimits.AwayExtensions A)
+    (ev : JointResidualLimits.AwayExtensions v)
+    (ep : JointResidualLimits.AwayExtensions p)
+    (haxis : Tendsto (fun t : ℝ => ‖velocity A v (t, 0)‖) (𝓝[<] 1) atTop) :
+    ∃ F : VelocityField,
+      CandidateProperties (TimeLocalization.activatedVelocity (periodicVelocity A v))
+        (TimeLocalization.activatedPressure (SpatialLocalization.periodicPressure p)) F ∧
+      ContDiff ℝ ∞ F ∧
+      (∀ n : ℕ, ∀ x : Space,
+        iteratedFDeriv ℝ n F (1, x) = boundaryLimits A v p eA ev ep x n) := by
+  have hu : ContDiffOn ℝ ∞ (periodicVelocity A v) preSingularDomain :=
+    periodicVelocity_smoothOn (hA.mono (fun _ h => ⟨h.1.2, h.2⟩))
+      (hv.mono (fun _ h => ⟨h.1.2, h.2⟩))
+  have hpc : ContDiffOn ℝ ∞ (SpatialLocalization.periodicPressure p) preSingularDomain :=
+    SpatialLocalization.periodicPressure_smoothOn (hp.mono (fun _ h => ⟨h.1.2, h.2⟩))
+  let L := boundaryLimits A v p eA ev ep
+  have hlim := boundaryLimits_locallyUniform hz eA ev ep
+  refine ⟨CandidateFromLimits.force _ _ hu hpc L hlim, ?_,
+    CandidateFromLimits.force_smooth _ _ hu hpc L hlim,
+    CandidateFromLimits.force_boundary_jets _ _ hu hpc L hlim⟩
+  apply CandidateFromLimits.candidate_properties _ _ hu hpc L hlim
+    (periodicVelocity_periodic A v _) (SpatialLocalization.periodicPressure_periodic p _) ?_
+    (periodicVelocity_speed_unbounded haxis)
+  intro t ht x
+  exact periodicVelocity_divergence_free hA hv hd ht.2 x
+
+/-- The actual angular stage sum, with the manuscript's implicit physical
+similarity scale and the same cutoff schedule as the other components. -/
+def angularDiagonal (h : ℝ) (a : ℕ → ℝ)
+    (D : ℕ → DirectAngularDiagonal.AngularData DirectAngularDiagonal.preterminalSlow) :
+    VelocityField :=
+  DirectAngularDiagonal.angularSum a (PhysicalWaveSum.physicalQ h) (fun j => (D j).scalar)
+
+/-- The direct angular sum is zero on the axis, without changing the
+potential's axial value or requiring a radial integral cancellation. -/
+theorem angularDiagonal_origin (h : ℝ) (a : ℕ → ℝ)
+    (D : ℕ → DirectAngularDiagonal.AngularData DirectAngularDiagonal.preterminalSlow)
+    (t : ℝ) : angularDiagonal h a D (t, 0) = 0 :=
+  DirectAngularDiagonal.angularSum_axis a _ _ t 0 rfl rfl
+
+/-- The angular hypotheses are only its actual smooth supported scalar
+stages.  Its smoothness, localized divergence and zero axis value are proved
+before applying the force construction.  Residual flatness and extensions of
+the complete incoming fields remain separate analytic obligations. -/
+theorem exists_force_for_angular_stages {h : ℝ} (hh : 0 < h) (hh1 : h < 1 / 2)
+    (D : ℕ → DirectAngularDiagonal.AngularData DirectAngularDiagonal.preterminalSlow)
+    {a : ℕ → ℝ} (ha : Tendsto a atTop atTop)
+    {A : VelocityField} {p : PressureField}
+    (hA : ContDiffOn ℝ ∞ A (SpacetimeEndpoint.openPast 1))
+    (hp : ContDiffOn ℝ ∞ p (SpacetimeEndpoint.openPast 1))
+    (hz : JointResidualLimits.VanishingJointJets (originalResidual A (angularDiagonal h a D) p))
+    (eA : JointResidualLimits.AwayExtensions A)
+    (ev : JointResidualLimits.AwayExtensions (angularDiagonal h a D))
+    (ep : JointResidualLimits.AwayExtensions p)
+    (haxis : Tendsto (fun t : ℝ => ‖SpatialCurl.spatialCurl A (t, 0)‖) (𝓝[<] 1) atTop) :
+    ∃ F : VelocityField,
+      CandidateProperties
+        (TimeLocalization.activatedVelocity (periodicVelocity A (angularDiagonal h a D)))
+        (TimeLocalization.activatedPressure (SpatialLocalization.periodicPressure p)) F ∧
+      ContDiff ℝ ∞ F ∧
+      (∀ n : ℕ, ∀ x : Space,
+        iteratedFDeriv ℝ n F (1, x) = boundaryLimits A (angularDiagonal h a D) p eA ev ep x n) := by
+  have hv : ContDiffOn ℝ ∞ (angularDiagonal h a D) (SpacetimeEndpoint.openPast 1) :=
+    (DirectAngularDiagonal.actual_diagonal_smooth hh hh1 D ha).mono (fun _ hx => hx.1)
+  have hd : ∀ t < 1, ∀ x,
+      spatialDivergence (SpatialLocalization.cutPotential (angularDiagonal h a D)) t x = 0 :=
+    DirectAngularDiagonal.actual_spatialCut_diagonal_divergence hh hh1 D ha
+  apply exists_candidate_force hA hv hp hd hz eA ev ep
+  simpa only [velocity, angularDiagonal_origin, add_zero] using haxis
+
+end NavierStokes.MixedPeriodicAssembly
+
+
+================================================================================
+FILE: ./NavierStokesAndEuler/NavierStokes/MixedDiagonalResidual.lean
+================================================================================
+import NavierStokes.MixedPeriodicAssembly
+import NavierStokes.DiagonalResidual
+import NavierStokes.AnnularEndpoint
+import NavierStokes.MixedDiagonalSchedule
+
+/-!
+# Residual estimates for the mixed diagonal sum
+
+The direct angular increments are summed as velocity fields, while the
+potential increments are differentiated after cutoff.  Both use the same
+scale sequence.  The actual mixed tail is estimated from these two different
+operations; it is not identified with the curl of an unspecified potential.
+
+The finite uncut background and residual estimates are explicit inputs from
+the correction construction.  The infinite-tail estimates and the resulting
+residual decay are proved here.
+-/
+
+noncomputable section
+
+namespace NavierStokes.MixedDiagonalResidual
+
+open ProblemStatement Set Filter DiagonalResidual ResidualStability
+open scoped Topology ContDiff BigOperators
+
+def velocity (a : ℕ → ℝ) (q : SpaceTime → ℝ) (A B : ℕ → VelocityField) :
+    VelocityField :=
+  fun z => SolenoidalDiagonal.velocitySum a q A z +
+    SolenoidalDiagonal.potentialSum a q B z
+
+/-- Stage zero remains in every nonempty uncut prefix. -/
+def uncutVelocity (A B : ℕ → VelocityField) (J : ℕ) : VelocityField :=
+  fun z => SpatialCurl.spatialCurl (DiagonalJetBounds.uncutPrefix A (J + 1)) z +
+    DiagonalJetBounds.uncutPrefix B (J + 1) z
+
+def pressure (a : ℕ → ℝ) (q : SpaceTime → ℝ) (P : ℕ → PressureField) :
+    PressureField := SolenoidalDiagonal.potentialSum a q P
+
+def residual (a : ℕ → ℝ) (q : SpaceTime → ℝ)
+    (A B : ℕ → VelocityField) (P : ℕ → PressureField) : VelocityField :=
+  fun z => navierStokesResidual (velocity a q A B) (pressure a q P) z.1 z.2
+
+/-- The residual is exactly the nonlinear residual used by the mixed
+localization and force construction, including both cross interactions. -/
+theorem residual_eq_originalResidual (a : ℕ → ℝ) (q : SpaceTime → ℝ)
+    (A B : ℕ → VelocityField) (P : ℕ → PressureField) :
+    residual a q A B P = MixedPeriodicAssembly.originalResidual
+      (SolenoidalDiagonal.potentialSum a q A)
+      (SolenoidalDiagonal.potentialSum a q B)
+      (SolenoidalDiagonal.potentialSum a q P) := rfl
+
+theorem velocity_smooth {a : ℕ → ℝ} (ha : Tendsto a atTop atTop)
+    {q : SpaceTime → ℝ} {A B : ℕ → VelocityField} {U : Set SpaceTime}
+    (hU : IsOpen U) (hqpos : ∀ z ∈ U, 0 < q z) (hq : ContDiffOn ℝ ∞ q U)
+    (hA : ∀ j, ContDiffOn ℝ ∞ (A j) U) (hB : ∀ j, ContDiffOn ℝ ∞ (B j) U) :
+    ContDiffOn ℝ ∞ (velocity a q A B) U :=
+  (SolenoidalDiagonal.velocitySum_contDiffOn ha hU hqpos hq hA).add
+    (SolenoidalDiagonal.potentialSum_contDiffOn ha hU hqpos hq hB)
+
+/-- Smoothness of the full cut sums suffices. The raw stages need not
+be smooth outside the positive-scale domain where they are constructed. -/
+theorem velocity_smooth_of_sums {a : ℕ → ℕ} {h : ℝ}
+    {A B : ℕ → VelocityField} {P : ℕ → PressureField}
+    (hs : MixedDiagonalSchedule.ThreeSmoothSums a h A B P) :
+    ContDiffOn ℝ ∞ (velocity (fun j => (a j : ℝ)) (PhysicalWaveSum.physicalQ h) A B)
+      PhysicalWaveSum.preterminal := by
+  intro z hz
+  have hmem := PhysicalWaveSum.preterminal_open.mem_nhds hz
+  exact ((SpatialCurl.contDiffAt_spatialCurl (hs.potential.contDiffAt hmem)
+    (by simp)).add (hs.direct.contDiffAt hmem)).contDiffWithinAt
+
+theorem uncutVelocity_smooth {A B : ℕ → VelocityField} {U : Set SpaceTime}
+    (hU : IsOpen U) (hA : ∀ j, ContDiffOn ℝ ∞ (A j) U)
+    (hB : ∀ j, ContDiffOn ℝ ∞ (B j) U) (J : ℕ) :
+    ContDiffOn ℝ ∞ (uncutVelocity A B J) U := by
+  have hpA : ContDiffOn ℝ ∞ (DiagonalJetBounds.uncutPrefix A (J + 1)) U :=
+    ContDiffOn.sum (fun j _ => hA j)
+  have hcurl : ContDiffOn ℝ ∞
+      (SpatialCurl.spatialCurl (DiagonalJetBounds.uncutPrefix A (J + 1))) U := by
+    intro z hz
+    exact (SpatialCurl.contDiffAt_spatialCurl
+      (hpA.contDiffAt (hU.mem_nhds hz)) (by simp)).contDiffWithinAt
+  exact hcurl.add (ContDiffOn.sum (fun j _ => hB j))
+
+/-- One derivative is paid for the potential component only.  The loss
+depends on the derivative order, never on the stage number. -/
+noncomputable def velocityLoss (LA LB : ℕ → ℝ) (m : ℕ) : ℝ := max (LA (m + 1)) (LB m)
+
+theorem velocity_tail_jetRate {a : ℕ → ℝ} (ha : Tendsto a atTop atTop)
+    {q : SpaceTime → ℝ} {A B : ℕ → VelocityField} {g LA LB : ℕ → ℝ}
+    {U : Set SpaceTime} {l : Filter SpaceTime}
+    (hU : IsOpen U) (hqpos : ∀ z ∈ U, 0 < q z) (hq : ContDiffOn ℝ ∞ q U)
+    (hA : ∀ j, ContDiffOn ℝ ∞ (A j) U) (hB : ∀ j, ContDiffOn ℝ ∞ (B j) U)
+    (hg : Monotone g)
+    (hbA : DiagonalJetBounds.CutStageBounds a q A g LA U)
+    (hbB : DiagonalJetBounds.CutStageBounds a q B g LB U)
+    (hlU : ∀ᶠ z in l, z ∈ U) (hlq : ∀ᶠ z in l, 0 < q z ∧ q z ≤ 1)
+    (hqzero : Tendsto q l (𝓝 0)) (J m : ℕ) (hm : m + 1 ≤ J + 3) :
+    JetRate l q (fun z => velocity a q A B z - uncutVelocity A B J z)
+      m (g (J + 1) - velocityLoss LA LB m) := by
+  have hAt := (jetRate_diagonal_velocity_tail ha hU hqpos hq hA hg hbA
+    hlU hlq hqzero J m hm).weaken hlq
+      (sub_le_sub_left (le_max_left (LA (m + 1)) (LB m)) _)
+  have hBt := (jetRate_diagonal_tail ha hU hq hB hg hbB
+    hlU hlq hqzero J m (by omega)).weaken hlq
+      (sub_le_sub_left (le_max_right (LA (m + 1)) (LB m)) _)
+  have hpA : ContDiffOn ℝ ∞ (DiagonalJetBounds.uncutPrefix A (J + 1)) U :=
+    ContDiffOn.sum (fun j _ => hA j)
+  have hcurl : ContDiffOn ℝ ∞
+      (SpatialCurl.spatialCurl (DiagonalJetBounds.uncutPrefix A (J + 1))) U := by
+    intro z hz
+    exact (SpatialCurl.contDiffAt_spatialCurl
+      (hpA.contDiffAt (hU.mem_nhds hz)) (by simp)).contDiffWithinAt
+  have hsum := hAt.add hBt hU hlU
+    ((SolenoidalDiagonal.velocitySum_contDiffOn ha hU hqpos hq hA).sub hcurl)
+    ((SolenoidalDiagonal.potentialSum_contDiffOn ha hU hqpos hq hB).sub
+      (ContDiffOn.sum (fun j _ => hB j)))
+  apply hsum.congr_on hU hlU
+  intro z hz
+  dsimp [velocity, uncutVelocity]
+  abel
+
+/-- Every positive power follows by selecting an adequately advanced
+finite uncut stage. No one fixed tail is assumed to have all powers. -/
+theorem residual_jetRate {a : ℕ → ℝ} (ha : Tendsto a atTop atTop)
+    {q : SpaceTime → ℝ} {A B : ℕ → VelocityField} {P : ℕ → PressureField}
+    {g LA LB LP Lbg Lres : ℕ → ℝ} {U : Set SpaceTime} {l : Filter SpaceTime}
+    (hU : IsOpen U) (hqpos : ∀ z ∈ U, 0 < q z) (hq : ContDiffOn ℝ ∞ q U)
+    (hA : ∀ j, ContDiffOn ℝ ∞ (A j) U) (hB : ∀ j, ContDiffOn ℝ ∞ (B j) U)
+    (hP : ∀ j, ContDiffOn ℝ ∞ (P j) U)
+    (hgmono : Monotone g) (hgtop : Tendsto g atTop atTop)
+    (hbA : DiagonalJetBounds.CutStageBounds a q A g LA U)
+    (hbB : DiagonalJetBounds.CutStageBounds a q B g LB U)
+    (hbP : DiagonalJetBounds.CutStageBounds a q P g LP U)
+    (hlU : ∀ᶠ z in l, z ∈ U) (hqzero : Tendsto q l (𝓝 0))
+    (hbg : ∀ J m, JetRate l q (uncutVelocity A B J) m (-Lbg m))
+    (hres : ∀ J m, JetRate l q
+      (fun z => navierStokesResidual (uncutVelocity A B J)
+        (DiagonalJetBounds.uncutPrefix P (J + 1)) z.1 z.2) m (g J - Lres m))
+    (m : ℕ) (r : ℝ) (hr : 0 ≤ r) :
+    JetRate l q (residual a q A B P) m r := by
+  have hlq : ∀ᶠ z in l, 0 < q z ∧ q z ≤ 1 := by
+    filter_upwards [hlU, hqzero.eventually (gt_mem_nhds (show (0 : ℝ) < 1 by norm_num))]
+      with z hz hq1
+    exact ⟨hqpos z hz, hq1.le⟩
+  have hprefixP (J : ℕ) :
+      ContDiffOn ℝ ∞ (DiagonalJetBounds.uncutPrefix P (J + 1)) U :=
+    ContDiffOn.sum (fun j _ => hP j)
+  apply DiagonalResidual.residual_jetRate_of_stages
+    (uStage := uncutVelocity A B)
+    (pStage := fun J => DiagonalJetBounds.uncutPrefix P (J + 1))
+    (g := g) (Ltail := fun m => max (velocityLoss LA LB m) (LP m))
+    hU hlU hlq (velocity_smooth ha hU hqpos hq hA hB)
+    (SolenoidalDiagonal.potentialSum_contDiffOn ha hU hqpos hq hP)
+    (uncutVelocity_smooth hU hA hB) hprefixP hgtop hbg ?_ ?_ hres m r hr
+  · intro J m hm
+    apply (velocity_tail_jetRate ha hU hqpos hq hA hB hgmono hbA hbB
+      hlU hlq hqzero J m (by omega)).weaken hlq
+    exact sub_le_sub (hgmono (Nat.le_succ J)) (le_max_left (velocityLoss LA LB m) (LP m))
+  · intro J m hm
+    apply (jetRate_diagonal_tail ha hU hq hP hgmono hbP hlU hlq hqzero J m
+      (by omega)).weaken hlq
+    exact sub_le_sub (hgmono (Nat.le_succ J)) (le_max_right (velocityLoss LA LB m) (LP m))
+
+/-- The actual physical scale has its joint zero limit at the origin.
+Thus the finite-stage construction inputs give the tensor limits needed
+by `MixedPeriodicAssembly`, rather than postulating those limits. -/
+theorem physical_vanishingJointJets {h : ℝ} (hh : 0 < h) (hh1 : h < 1 / 2)
+    {a : ℕ → ℝ} (ha : Tendsto a atTop atTop)
+    {A B : ℕ → VelocityField} {P : ℕ → PressureField}
+    {g LA LB LP Lbg Lres : ℕ → ℝ} {U : Set SpaceTime}
+    (hU : IsOpen U) (hUp : U ⊆ PhysicalWaveSum.preterminal)
+    (hlU : ∀ᶠ z in 𝓝[SpacetimeEndpoint.openPast 1] (1, (0 : Space)), z ∈ U)
+    (hA : ∀ j, ContDiffOn ℝ ∞ (A j) U) (hB : ∀ j, ContDiffOn ℝ ∞ (B j) U)
+    (hP : ∀ j, ContDiffOn ℝ ∞ (P j) U)
+    (hgmono : Monotone g) (hgtop : Tendsto g atTop atTop)
+    (hbA : DiagonalJetBounds.CutStageBounds a (PhysicalWaveSum.physicalQ h) A g LA U)
+    (hbB : DiagonalJetBounds.CutStageBounds a (PhysicalWaveSum.physicalQ h) B g LB U)
+    (hbP : DiagonalJetBounds.CutStageBounds a (PhysicalWaveSum.physicalQ h) P g LP U)
+    (hbg : ∀ J m, JetRate (𝓝[SpacetimeEndpoint.openPast 1] (1, (0 : Space)))
+      (PhysicalWaveSum.physicalQ h) (uncutVelocity A B J) m (-Lbg m))
+    (hres : ∀ J m, JetRate (𝓝[SpacetimeEndpoint.openPast 1] (1, (0 : Space)))
+      (PhysicalWaveSum.physicalQ h)
+      (fun z => navierStokesResidual (uncutVelocity A B J)
+        (DiagonalJetBounds.uncutPrefix P (J + 1)) z.1 z.2) m (g J - Lres m)) :
+    JointResidualLimits.VanishingJointJets (residual a (PhysicalWaveSum.physicalQ h) A B P) := by
+  have hqpos : ∀ z ∈ U, 0 < PhysicalWaveSum.physicalQ h z :=
+    fun z hz => PhysicalWaveSum.physicalQ_pos hh hh1 (hUp hz)
+  have hq : ContDiffOn ℝ ∞ (PhysicalWaveSum.physicalQ h) U :=
+    fun z hz => (PhysicalWaveSum.physicalQ_smoothAt hh hh1 (hUp hz)).contDiffWithinAt
+  have hqzero := AnnularEndpoint.physicalQ_tendsto_zero hh hh1 (x := (0 : Space)) rfl
+  intro m
+  exact SimilarityApproach.jet_tendsto_zero
+    (residual_jetRate ha hU hqpos hq hA hB hP hgmono hgtop hbA hbB hbP
+      hlU hqzero hbg hres m 1 zero_le_one) hqzero
+
+/-- A single schedule is selected from the three genuine raw estimates.
+The resulting mixed residual has joint zero jets. All raw fields are used
+only on their stated positive-scale domain, and stage zero is retained. -/
+theorem exists_physical_schedule_residual_zero {h qbig : ℝ}
+    (hh : 0 < h) (hh1 : h < 1 / 2) (hqbig : 0 < qbig)
+    {S : Set SpaceTime} (hSopen : IsOpen S) (hS : S ⊆ PhysicalWaveSum.preterminal)
+    (hlS : ∀ᶠ z in 𝓝[SpacetimeEndpoint.openPast 1] (1, (0 : Space)), z ∈ S)
+    {A B : ℕ → VelocityField} {P : ℕ → PressureField}
+    (hA : ∀ j, ContDiffOn ℝ ∞ (A j) (CutStageEstimates.physicalSublevel h qbig))
+    (hB : ∀ j, ContDiffOn ℝ ∞ (B j) (CutStageEstimates.physicalSublevel h qbig))
+    (hP : ∀ j, ContDiffOn ℝ ∞ (P j) (CutStageEstimates.physicalSublevel h qbig))
+    (g LA LB LP Lbg Lres : ℕ → ℝ) (CA CB CP pA pB pP : ℕ → ℕ → ℝ)
+    (rawA : CutStageEstimates.RawStageBounds (PhysicalWaveSum.physicalQ h) A g LA CA pA
+      (S ∩ CutStageEstimates.physicalSublevel h qbig))
+    (rawB : CutStageEstimates.RawStageBounds (PhysicalWaveSum.physicalQ h) B g LB CB pB
+      (S ∩ CutStageEstimates.physicalSublevel h qbig))
+    (rawP : CutStageEstimates.RawStageBounds (PhysicalWaveSum.physicalQ h) P g LP CP pP
+      (S ∩ CutStageEstimates.physicalSublevel h qbig))
+    (hg0 : 0 ≤ g 0) (hg : ∀ j, 1 ≤ j → 0 < g j)
+    (hgmono : Monotone g) (hgtop : Tendsto g atTop atTop)
+    (hbg : ∀ J m, JetRate (𝓝[SpacetimeEndpoint.openPast 1] (1, (0 : Space)))
+      (PhysicalWaveSum.physicalQ h) (uncutVelocity A B J) m (-Lbg m))
+    (hres : ∀ J m, JetRate (𝓝[SpacetimeEndpoint.openPast 1] (1, (0 : Space)))
+      (PhysicalWaveSum.physicalQ h)
+      (fun z => navierStokesResidual (uncutVelocity A B J)
+        (DiagonalJetBounds.uncutPrefix P (J + 1)) z.1 z.2) m (g J - Lres m))
+    (lower : ℕ) :
+    ∃ a : ℕ → ℕ, lower ≤ a 0 ∧ (∀ j, 0 < a j) ∧
+      (∀ j, 2 * a j ≤ a (j + 1)) ∧ StrictMono a ∧
+      Tendsto (fun j => (a j : ℝ)) atTop atTop ∧
+      (∀ j, 1 / (a j : ℝ) < qbig) ∧
+      MixedDiagonalSchedule.ThreeCutBounds a h A B P (fun j => g j / 2)
+        (MixedDiagonalSchedule.commonLoss LA LB LP) S ∧
+      MixedDiagonalSchedule.ThreeSmoothSums a h A B P ∧
+      JointResidualLimits.VanishingJointJets
+        (residual (fun j => (a j : ℝ)) (PhysicalWaveSum.physicalQ h) A B P) := by
+  obtain ⟨a, hal, hap, had, ham, hat, hrecip, hb, hs⟩ :=
+    MixedDiagonalSchedule.exists_three_component_local_schedule hh hh1 hqbig hS
+      hA hB hP g LA LB LP CA CB CP pA pB pP rawA rawB rawP hg lower
+  refine ⟨a, hal, hap, had, ham, hat, hrecip, hb, hs, ?_⟩
+  let U := S ∩ CutStageEstimates.physicalSublevel h qbig
+  have hU : IsOpen U := hSopen.inter (CutStageEstimates.physicalSublevel_open hh hh1 qbig)
+  have hUp : U ⊆ PhysicalWaveSum.preterminal := fun _ hx => hS hx.1
+  have hqzero := AnnularEndpoint.physicalQ_tendsto_zero hh hh1 (x := (0 : Space)) rfl
+  have hlU : ∀ᶠ z in 𝓝[SpacetimeEndpoint.openPast 1] (1, (0 : Space)), z ∈ U := by
+    filter_upwards [hlS, hqzero.eventually (gt_mem_nhds hqbig)] with z hz hqz
+    exact ⟨hz, hS hz, hqz⟩
+  have hlq : ∀ᶠ z in 𝓝[SpacetimeEndpoint.openPast 1] (1, (0 : Space)),
+      0 < PhysicalWaveSum.physicalQ h z ∧ PhysicalWaveSum.physicalQ h z ≤ 1 := by
+    filter_upwards [hlS, hqzero.eventually (gt_mem_nhds (show (0 : ℝ) < 1 by norm_num))]
+      with z hz hqz
+    exact ⟨PhysicalWaveSum.physicalQ_pos hh hh1 (hS hz), hqz.le⟩
+  have hhalfmono : Monotone (fun j => g j / 2) := by
+    intro i j hij
+    exact div_le_div_of_nonneg_right (hgmono hij) (by norm_num)
+  have hhalftop : Tendsto (fun j => g j / 2) atTop atTop := by
+    apply tendsto_atTop.2
+    intro r
+    filter_upwards [hgtop.eventually (eventually_ge_atTop (2 * r))] with j hj
+    linarith
+  have hnonneg (J : ℕ) : 0 ≤ g J := hg0.trans (hgmono (Nat.zero_le J))
+  apply physical_vanishingJointJets (Lbg := Lbg) (Lres := Lres) hh hh1 hat hU hUp hlU
+    (fun j => (hA j).mono inter_subset_right)
+    (fun j => (hB j).mono inter_subset_right)
+    (fun j => (hP j).mono inter_subset_right) hhalfmono hhalftop
+    (fun j hj m hm z hz => hb.potential j hj m hm z hz.1)
+    (fun j hj m hm z hz => hb.direct j hj m hm z hz.1)
+    (fun j hj m hm z hz => hb.pressure j hj m hm z hz.1) hbg
+  intro J m
+  exact (hres J m).weaken hlq (by linarith [hnonneg J])
+
+end NavierStokes.MixedDiagonalResidual
+
+
+================================================================================
+FILE: ./NavierStokesAndEuler/NavierStokes/WholeDomainPhysicalStageTheorem.lean
+================================================================================
+import NavierStokes.WholeDomainBaseBounds
+import NavierStokes.WholeDomainInitializationBounds
+import NavierStokes.WholeDomainPrefixBounds
+import NavierStokes.SharpParticularStageBounds
+
+noncomputable section
+
+namespace NavierStokes.WholeDomainStageBounds
+
+open Set Function Filter ProblemStatement PhysicalWaveSum SharpGluedStageBounds
+open CorrectionInitialization.ActualPrimary ActualCandidateAssembly
+open scoped Topology ContDiff BigOperators
+
+/-- One derivative loss controls both finite fields. It contains no
+finite-stage index and is chosen on the original fixed construction. -/
+noncomputable def finiteLoss (B N0 : ℕ) (m : ℕ) : ℝ :=
+  max
+    (prefixLoss (initialVelocityLoss B N0 ActualBaseVelocityBounds.heatLoss)
+      (SharpPhysicalCarrier.physicalLoss h) m)
+    (prefixLoss (initialPressureTotalLoss B N0 ActualBasePressureBounds.pressureLoss)
+      (SharpPhysicalCarrier.physicalLoss h) m)
+
+private theorem commonDomain_subset (B N0 : ℕ) :
+    CutStageEstimates.physicalSublevel h (commonQ B N0) ⊆ ActualCandidateConstruction.physicalDomain B N0 :=
+  fun _ hw => ⟨hw.1,hw.2.trans (commonQ_lt_original B N0)⟩
+
+/-- Every literal finite velocity prefix is bounded throughout one
+common domain, including the unbounded radial exterior. -/
+theorem actual_finite_velocity_bound (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (J m : ℕ) :
+    LogBound h (commonQ B N0) (finiteVelocity B N0 hN J) m (-finiteLoss B N0 m) := by
+  have hs := stages_smooth B N0 hN
+  have hA := fun j => (hs.1 j).mono (commonDomain_subset B N0)
+  have hB := fun j => (hs.2.1 j).mono (commonDomain_subset B N0)
+  have hzero : ∀ k, LogBound h (commonQ B N0) (finiteVelocity B N0 hN 0) k
+      (-initialVelocityLoss B N0 ActualBaseVelocityBounds.heatLoss k) := by
+    intro k
+    apply initial_velocity_of_base_bound B N0 hN (commonQ_lt_original B N0).le
+      ActualBaseVelocityBounds.heatLoss k
+    apply LogBound.of_bound
+    obtain ⟨C,hC,hb⟩ := WholeDomainBaseBounds.velocity_bound certificate modulation upper B k
+    exact ⟨C,hC,fun w hw hq => hb w hw.1 hq⟩
+  have hpos := fun j k => (SharpParticularStageBounds.actual_velocity_bound B N0 hN j k).mono_domain
+    (commonQ_lt_original B N0).le
+  exact (finite_velocity_log_bound outgoing.data.h_pos outgoing.data.h_lt_half hA hB
+    (ActualIterationLedger.gain_nonneg outgoing.data.h_pos.le) hzero hpos J m).weaken
+      outgoing.data.h_pos outgoing.data.h_lt_half (neg_le_neg (le_max_left _ _))
+
+/-- The pressure prefix has the same fixed domain and the same loss as
+the velocity prefix. -/
+theorem actual_finite_pressure_bound (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (J m : ℕ) :
+    LogBound h (commonQ B N0) (finitePressure B N0 hN J) m (-finiteLoss B N0 m) := by
+  have hs := fun j => ((stages_smooth B N0 hN).2.2 j).mono (commonDomain_subset B N0)
+  have hzero : ∀ k, LogBound h (commonQ B N0) (pressureStages B N0 hN 0) k
+      (-initialPressureTotalLoss B N0 ActualBasePressureBounds.pressureLoss k) := by
+    intro k
+    apply initial_pressure_of_base_bound B N0 hN (commonQ_lt_original B N0).le
+      ActualBasePressureBounds.pressureLoss k
+    apply LogBound.of_bound
+    obtain ⟨C,hC,hb⟩ := WholeDomainBaseBounds.pressure_bound certificate modulation upper B k
+    exact ⟨C,hC,fun w hw hq => hb w hw.1 hq⟩
+  have hpos := fun j k => (SharpParticularStageBounds.actual_pressure_bound B N0 hN j k).mono_domain
+    (commonQ_lt_original B N0).le
+  exact (prefix_log_bound outgoing.data.h_pos outgoing.data.h_lt_half hs
+    (ActualIterationLedger.gain_nonneg outgoing.data.h_pos.le) hzero hpos J m).weaken
+      outgoing.data.h_pos outgoing.data.h_lt_half (neg_le_neg (le_max_right _ _))
+
+/-- Both fields of a finite prefix obey a single whole-domain estimate. -/
+theorem actual_finite_fields_bound (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (J m : ℕ) :
+    ∃ C : ℝ, 0 ≤ C ∧ ∃ P : ℕ, ∀ w ∈ CutStageEstimates.physicalSublevel h (commonQ B N0),
+      ‖iteratedFDeriv ℝ m (finiteVelocity B N0 hN J) w‖ +
+        ‖iteratedFDeriv ℝ m (finitePressure B N0 hN J) w‖ ≤
+        C * physicalQ h w ^ (-finiteLoss B N0 m) * (1+|Real.log (physicalQ h w)|)^P := by
+  obtain ⟨C,hC,P,hv⟩ := actual_finite_velocity_bound B N0 hN J m
+  obtain ⟨D,hD,Q,hp⟩ := actual_finite_pressure_bound B N0 hN J m
+  refine ⟨C+D,add_nonneg hC hD,P+Q,?_⟩
+  intro w hw
+  have hq := hw.2.le.trans (commonQ_le_one B N0)
+  have hq0 := physicalQ_pos outgoing.data.h_pos outgoing.data.h_lt_half hw.1
+  have hL : 1 ≤ 1+|Real.log (physicalQ h w)| := by linarith [abs_nonneg (Real.log (physicalQ h w))]
+  have hv' := (hv w hw hq).trans (mul_le_mul_of_nonneg_left
+    (pow_le_pow_right₀ hL (Nat.le_add_right P Q)) (mul_nonneg hC (Real.rpow_nonneg hq0.le _)))
+  have hp' := (hp w hw hq).trans (mul_le_mul_of_nonneg_left
+    (pow_le_pow_right₀ hL (Nat.le_add_left Q P)) (mul_nonneg hD (Real.rpow_nonneg hq0.le _)))
+  exact (add_le_add hv' hp').trans_eq (by ring)
+
+/-- Whole-domain physical-loss estimates for the actual iteration: every
+stage uses the same positive scale, every finite prefix uses the same
+derivative loss, and each increment has the manuscript's printed loss. -/
+theorem physical_stage_estimates (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    0 < commonQ B N0 ∧
+    (∀ J m, LogBound h (commonQ B N0) (finiteVelocity B N0 hN J) m (-finiteLoss B N0 m) ∧
+      LogBound h (commonQ B N0) (finitePressure B N0 hN J) m (-finiteLoss B N0 m)) ∧
+    (∀ J m, ∃ C : ℝ, 0 ≤ C ∧ ∀ w ∈ CutStageEstimates.physicalSublevel h (commonQ B N0),
+      ‖iteratedFDeriv ℝ m (fun z => navierStokesResidual
+        (finiteVelocity B N0 hN J) (finitePressure B N0 hN J) z.1 z.2) w‖ ≤
+        C * physicalQ h w ^ (h*ActualIterationLedger.sigma J-ActualCycleResidualBounds.fixedLoss m)) ∧
+    (∀ j m, LogBound h (commonQ B N0)
+      (MixedFiniteBackground.stageVelocity (potentialStages B N0 hN) (directStages B N0 hN) (j+1)) m
+      (ActualIterationLedger.gain h (j+1)-SharpPhysicalCarrier.physicalLoss h m) ∧
+      LogBound h (commonQ B N0) (pressureStages B N0 hN (j+1)) m
+      (ActualIterationLedger.gain h (j+1)-SharpPhysicalCarrier.physicalLoss h m)) := by
+  refine ⟨commonQ_pos B N0,?_,actual_finite_residual_bound B N0 hN,?_⟩
+  · exact fun J m => ⟨actual_finite_velocity_bound B N0 hN J m,actual_finite_pressure_bound B N0 hN J m⟩
+  · exact fun j m => ⟨(SharpParticularStageBounds.actual_velocity_bound B N0 hN j m).mono_domain
+      (commonQ_lt_original B N0).le,
+      (SharpParticularStageBounds.actual_pressure_bound B N0 hN j m).mono_domain (commonQ_lt_original B N0).le⟩
+
+/-- Every component of `Z_j = (A_j, B_j, p_j)` and the recovered velocity
+increment obey one common constant and logarithmic power. -/
+theorem actual_increment_bound (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) (j m : ℕ) :
+    ∃ C : ℝ, 0 ≤ C ∧ ∃ P : ℕ, ∀ w ∈ CutStageEstimates.physicalSublevel h (commonQ B N0),
+      ‖iteratedFDeriv ℝ m (potentialStages B N0 hN (j+1)) w‖ +
+        ‖iteratedFDeriv ℝ m (directStages B N0 hN (j+1)) w‖ +
+        ‖iteratedFDeriv ℝ m (pressureStages B N0 hN (j+1)) w‖ +
+        ‖iteratedFDeriv ℝ m (MixedFiniteBackground.stageVelocity
+          (potentialStages B N0 hN) (directStages B N0 hN) (j+1)) w‖ ≤
+      C * physicalQ h w ^ (ActualIterationLedger.gain h (j+1)-SharpPhysicalCarrier.physicalLoss h m) *
+        (1+|Real.log (physicalQ h w)|)^P := by
+  obtain ⟨C,hC,P,hv⟩ := (SharpParticularStageBounds.actual_potential_bound B N0 hN j m).mono_domain
+    (commonQ_lt_original B N0).le
+  obtain ⟨D,hD,Q,hd⟩ := (SharpActualStageBounds.direct_bound B N0 hN j m).mono_domain
+    (commonQ_lt_original B N0).le
+  obtain ⟨F,hF,R,hp⟩ := (SharpParticularStageBounds.actual_pressure_bound B N0 hN j m).mono_domain
+    (commonQ_lt_original B N0).le
+  obtain ⟨G,hG,S,hu⟩ := (SharpParticularStageBounds.actual_velocity_bound B N0 hN j m).mono_domain
+    (commonQ_lt_original B N0).le
+  refine ⟨C+D+F+G,by positivity,P+Q+R+S,?_⟩
+  intro w hw
+  have hq := hw.2.le.trans (commonQ_le_one B N0)
+  have hq0 := physicalQ_pos outgoing.data.h_pos outgoing.data.h_lt_half hw.1
+  have hL : 1 ≤ 1+|Real.log (physicalQ h w)| := by linarith [abs_nonneg (Real.log (physicalQ h w))]
+  have hv' := (hv w hw hq).trans (mul_le_mul_of_nonneg_left
+    (pow_le_pow_right₀ hL (show P ≤ P+Q+R+S by omega)) (mul_nonneg hC (Real.rpow_nonneg hq0.le _)))
+  have hd' := (hd w hw hq).trans (mul_le_mul_of_nonneg_left
+    (pow_le_pow_right₀ hL (show Q ≤ P+Q+R+S by omega)) (mul_nonneg hD (Real.rpow_nonneg hq0.le _)))
+  have hp' := (hp w hw hq).trans (mul_le_mul_of_nonneg_left
+    (pow_le_pow_right₀ hL (show R ≤ P+Q+R+S by omega)) (mul_nonneg hF (Real.rpow_nonneg hq0.le _)))
+  have hu' := (hu w hw hq).trans (mul_le_mul_of_nonneg_left
+    (pow_le_pow_right₀ hL (show S ≤ P+Q+R+S by omega)) (mul_nonneg hG (Real.rpow_nonneg hq0.le _)))
+  exact (add_le_add (add_le_add (add_le_add hv' hd') hp') hu').trans_eq (by ring)
+
+noncomputable def paperLoss (B N0 : ℕ) (m : ℕ) : ℝ :=
+  max (finiteLoss B N0 m) (ActualCycleResidualBounds.fixedLoss m)
+
+/-- The three quantitative conclusions of `iter:physical-loss`, with one
+domain and one common finite-prefix/residual loss. The residual conclusion
+is stronger than the displayed estimate: all flat remainders are absorbed,
+so its additional flat-error term can be chosen to be zero. -/
+theorem exact_physical_loss (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    0 < commonQ B N0 ∧
+    (∀ j m, ∃ C : ℝ, 0 ≤ C ∧ ∃ P : ℕ, ∀ w ∈ CutStageEstimates.physicalSublevel h (commonQ B N0),
+      ‖iteratedFDeriv ℝ m (potentialStages B N0 hN (j+1)) w‖ +
+        ‖iteratedFDeriv ℝ m (directStages B N0 hN (j+1)) w‖ +
+        ‖iteratedFDeriv ℝ m (pressureStages B N0 hN (j+1)) w‖ +
+        ‖iteratedFDeriv ℝ m (MixedFiniteBackground.stageVelocity
+          (potentialStages B N0 hN) (directStages B N0 hN) (j+1)) w‖ ≤
+      C * physicalQ h w ^ (ActualIterationLedger.gain h (j+1)-SharpPhysicalCarrier.physicalLoss h m) *
+        (1+|Real.log (physicalQ h w)|)^P) ∧
+    (∀ J m, ∃ C : ℝ, 0 ≤ C ∧ ∃ P : ℕ, ∀ w ∈ CutStageEstimates.physicalSublevel h (commonQ B N0),
+      ‖iteratedFDeriv ℝ m (finiteVelocity B N0 hN J) w‖ +
+        ‖iteratedFDeriv ℝ m (finitePressure B N0 hN J) w‖ ≤
+        C * physicalQ h w ^ (-paperLoss B N0 m) * (1+|Real.log (physicalQ h w)|)^P) ∧
+    (∀ J m, ∃ C : ℝ, 0 ≤ C ∧ ∀ w ∈ CutStageEstimates.physicalSublevel h (commonQ B N0),
+      ‖iteratedFDeriv ℝ m (fun z => navierStokesResidual
+        (finiteVelocity B N0 hN J) (finitePressure B N0 hN J) z.1 z.2) w‖ ≤
+        C * physicalQ h w ^ (h*ActualIterationLedger.sigma J-paperLoss B N0 m)) := by
+  refine ⟨commonQ_pos B N0,actual_increment_bound B N0 hN,?_,?_⟩
+  · intro J m
+    obtain ⟨C,hC,P,hb⟩ := actual_finite_fields_bound B N0 hN J m
+    refine ⟨C,hC,P,fun w hw => (hb w hw).trans ?_⟩
+    exact mul_le_mul_of_nonneg_right (mul_le_mul_of_nonneg_left
+      (Real.rpow_le_rpow_of_exponent_ge (physicalQ_pos outgoing.data.h_pos outgoing.data.h_lt_half hw.1)
+        (hw.2.le.trans (commonQ_le_one B N0)) (neg_le_neg (le_max_left _ _))) hC) (by positivity)
+  · intro J m
+    obtain ⟨C,hC,hb⟩ := actual_finite_residual_bound B N0 hN J m
+    refine ⟨C,hC,fun w hw => (hb w hw).trans ?_⟩
+    exact mul_le_mul_of_nonneg_left
+      (Real.rpow_le_rpow_of_exponent_ge (physicalQ_pos outgoing.data.h_pos outgoing.data.h_lt_half hw.1)
+        (hw.2.le.trans (commonQ_le_one B N0)) (sub_le_sub_left (le_max_right _ _) _)) hC
+
+/-- A stage-independent loss for all derivatives through the specified order. -/
+noncomputable def paperJetLoss (B N0 : ℕ) (m : ℕ) : ℝ :=
+  ∑ k : Fin (m+1), |paperLoss B N0 k.val|
+
+theorem paperLoss_le_paperJetLoss (B N0 m k : ℕ) (hk : k ≤ m) :
+    paperLoss B N0 k ≤ paperJetLoss B N0 m := by
+  exact (le_abs_self _).trans (Finset.single_le_sum
+    (fun t _ => abs_nonneg (paperLoss B N0 t.val))
+    (Finset.mem_univ (⟨k,by omega⟩ : Fin (m+1))))
+
+private theorem physicalLoss_mono {k m : ℕ} (hkm : k ≤ m) :
+    SharpPhysicalCarrier.physicalLoss h k ≤ SharpPhysicalCarrier.physicalLoss h m := by
+  have hk : (k : ℝ) ≤ (m : ℝ) := by exact_mod_cast hkm
+  unfold SharpPhysicalCarrier.physicalLoss SharpPhysicalCarrier.derivativeCost
+  nlinarith [outgoing.data.h_pos]
+
+private theorem finite_log_bounds (B N0 m : ℕ) (F : ℕ → SpaceTime → ℝ) (e : ℝ)
+    (hF : ∀ k ≤ m, ∃ C : ℝ, 0 ≤ C ∧ ∃ P : ℕ,
+      ∀ w ∈ CutStageEstimates.physicalSublevel h (commonQ B N0),
+      F k w ≤ C * physicalQ h w ^ e * (1+|Real.log (physicalQ h w)|)^P) :
+    ∃ C : ℝ, 0 ≤ C ∧ ∃ P : ℕ, ∀ k ≤ m,
+      ∀ w ∈ CutStageEstimates.physicalSublevel h (commonQ B N0),
+      F k w ≤ C * physicalQ h w ^ e * (1+|Real.log (physicalQ h w)|)^P := by
+  choose C hC P hb using fun k : Fin (m+1) => hF k.val (by omega)
+  refine ⟨∑ k, C k,Finset.sum_nonneg (fun k _ => hC k),∑ k, P k,?_⟩
+  intro k hk w hw
+  let i : Fin (m+1) := ⟨k,by omega⟩
+  have hq := (physicalQ_pos outgoing.data.h_pos outgoing.data.h_lt_half hw.1).le
+  have hL : 1 ≤ 1+|Real.log (physicalQ h w)| := by linarith [abs_nonneg (Real.log (physicalQ h w))]
+  have hP : P i ≤ ∑ t, P t := Finset.single_le_sum (fun t _ => Nat.zero_le (P t)) (Finset.mem_univ i)
+  have hCi : C i ≤ ∑ t, C t := Finset.single_le_sum (fun t _ => hC t) (Finset.mem_univ i)
+  exact (hb i w hw).trans ((mul_le_mul_of_nonneg_left
+    (pow_le_pow_right₀ hL hP) (mul_nonneg (hC i) (Real.rpow_nonneg hq _))).trans
+    (mul_le_mul_of_nonneg_right (mul_le_mul_of_nonneg_right hCi (Real.rpow_nonneg hq _))
+      (pow_nonneg (by linarith) _)))
+
+private theorem finite_power_bounds (B N0 m : ℕ) (F : ℕ → SpaceTime → ℝ) (e : ℝ)
+    (hF : ∀ k ≤ m, ∃ C : ℝ, 0 ≤ C ∧
+      ∀ w ∈ CutStageEstimates.physicalSublevel h (commonQ B N0),
+      F k w ≤ C * physicalQ h w ^ e) :
+    ∃ C : ℝ, 0 ≤ C ∧ ∀ k ≤ m,
+      ∀ w ∈ CutStageEstimates.physicalSublevel h (commonQ B N0),
+      F k w ≤ C * physicalQ h w ^ e := by
+  choose C hC hb using fun k : Fin (m+1) => hF k.val (by omega)
+  refine ⟨∑ k, C k,Finset.sum_nonneg (fun k _ => hC k),?_⟩
+  intro k hk w hw
+  let i : Fin (m+1) := ⟨k,by omega⟩
+  exact (hb i w hw).trans (mul_le_mul_of_nonneg_right
+    (Finset.single_le_sum (fun t _ => hC t) (Finset.mem_univ i))
+    (Real.rpow_nonneg (physicalQ_pos outgoing.data.h_pos outgoing.data.h_lt_half hw.1).le _))
+
+/-- The complete printed physical-loss statement. All components of `Z_j`
+and the velocity increment are included, and each bound simultaneously covers
+every derivative through order `m`, as required by the manuscript's jet norm.
+The scale is common to all stages and orders; the prefix/residual loss is
+independent of the finite-stage index. -/
+theorem paper_physical_loss (B N0 : ℕ)
+    (hN : ActualCarrierGeometry.geometricThreshold ≤ N0) :
+    0 < commonQ B N0 ∧
+    (∀ j m, ∃ C : ℝ, 0 ≤ C ∧ ∃ P : ℕ, ∀ k ≤ m,
+      ∀ w ∈ CutStageEstimates.physicalSublevel h (commonQ B N0),
+      ‖iteratedFDeriv ℝ k (potentialStages B N0 hN (j+1)) w‖ +
+        ‖iteratedFDeriv ℝ k (directStages B N0 hN (j+1)) w‖ +
+        ‖iteratedFDeriv ℝ k (pressureStages B N0 hN (j+1)) w‖ +
+        ‖iteratedFDeriv ℝ k (MixedFiniteBackground.stageVelocity
+          (potentialStages B N0 hN) (directStages B N0 hN) (j+1)) w‖ ≤
+      C * physicalQ h w ^ (ActualIterationLedger.gain h (j+1)-SharpPhysicalCarrier.physicalLoss h m) *
+        (1+|Real.log (physicalQ h w)|)^P) ∧
+    (∀ J m, ∃ C : ℝ, 0 ≤ C ∧ ∃ P : ℕ, ∀ k ≤ m,
+      ∀ w ∈ CutStageEstimates.physicalSublevel h (commonQ B N0),
+      ‖iteratedFDeriv ℝ k (finiteVelocity B N0 hN J) w‖ +
+        ‖iteratedFDeriv ℝ k (finitePressure B N0 hN J) w‖ ≤
+        C * physicalQ h w ^ (-paperJetLoss B N0 m) * (1+|Real.log (physicalQ h w)|)^P) ∧
+    (∀ J m, ∃ C : ℝ, 0 ≤ C ∧ ∀ k ≤ m,
+      ∀ w ∈ CutStageEstimates.physicalSublevel h (commonQ B N0),
+      ‖iteratedFDeriv ℝ k (fun z => navierStokesResidual
+        (finiteVelocity B N0 hN J) (finitePressure B N0 hN J) z.1 z.2) w‖ ≤
+        C * physicalQ h w ^ (h*ActualIterationLedger.sigma J-paperJetLoss B N0 m)) := by
+  obtain ⟨hq,hi,hf,hr⟩ := exact_physical_loss B N0 hN
+  refine ⟨hq,?_,?_,?_⟩
+  · intro j m
+    apply finite_log_bounds
+    intro k hk
+    obtain ⟨C,hC,P,hb⟩ := hi j k
+    refine ⟨C,hC,P,fun w hw => (hb w hw).trans ?_⟩
+    exact mul_le_mul_of_nonneg_right (mul_le_mul_of_nonneg_left
+      (Real.rpow_le_rpow_of_exponent_ge (physicalQ_pos outgoing.data.h_pos outgoing.data.h_lt_half hw.1)
+        (hw.2.le.trans (commonQ_le_one B N0)) (sub_le_sub_left (physicalLoss_mono hk) _)) hC) (by positivity)
+  · intro J m
+    apply finite_log_bounds
+    intro k hk
+    obtain ⟨C,hC,P,hb⟩ := hf J k
+    refine ⟨C,hC,P,fun w hw => (hb w hw).trans ?_⟩
+    exact mul_le_mul_of_nonneg_right (mul_le_mul_of_nonneg_left
+      (Real.rpow_le_rpow_of_exponent_ge (physicalQ_pos outgoing.data.h_pos outgoing.data.h_lt_half hw.1)
+        (hw.2.le.trans (commonQ_le_one B N0)) (neg_le_neg (paperLoss_le_paperJetLoss B N0 m k hk))) hC) (by positivity)
+  · intro J m
+    apply finite_power_bounds
+    intro k hk
+    obtain ⟨C,hC,hb⟩ := hr J k
+    refine ⟨C,hC,fun w hw => (hb w hw).trans ?_⟩
+    exact mul_le_mul_of_nonneg_left
+      (Real.rpow_le_rpow_of_exponent_ge (physicalQ_pos outgoing.data.h_pos outgoing.data.h_lt_half hw.1)
+        (hw.2.le.trans (commonQ_le_one B N0))
+        (sub_le_sub_left (paperLoss_le_paperJetLoss B N0 m k hk) _)) hC
+
+end NavierStokes.WholeDomainStageBounds
+
+
